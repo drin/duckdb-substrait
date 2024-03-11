@@ -395,7 +395,7 @@ namespace duckdb {
   }
 
 
-  // >> Top-level transformation function
+  // >> Top-level translation function
   using SExprType = substrait::Expression::RexTypeCase;
 
   unique_ptr<ParsedExpression>
