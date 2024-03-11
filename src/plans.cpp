@@ -48,14 +48,19 @@ namespace duckdb {
   }
 
   // >> Entry points for substrait plan (json or binary) -> duckdb logical plan
-  shared_ptr<LogicalOperator>
+  unique_ptr<LogicalOperator>
   DuckDBTranslator::TranspilePlanMessage(const string &serialized_msg) {
-    if (not plan.ParseFromString(serialized_msg)) {
-      throw std::runtime_error("Error parsing serialized Substrait Plan");
-    }
+    // Translate substrait to duckdb::Relation
+    shared_ptr<Relation> translated_msg { TranslatePlanMessage(serialized_msg); }
 
-    DuckDBEnginePlan engine_plan { *t_conn };
-    return engine_plan.SystemPlanFromSubstraitPlan(plan);
+    // Transform Relation to QueryNode and wrap in a SQLStatement
+    auto plan_wrapper  = make_uniq<SelectStatement>();
+    plan_wrapper->node = translated_msg->GetQueryNode();
+
+    // Create a planner to go from SQLStatement -> LogicalOperator
+    Planner planner { context };
+    planner.CreatePlan(plan_wrapper);
+    return std::move(planner.plan);
   }
 
   // >> Entry points for substrait plan (json or binary) -> duckdb execution plan
