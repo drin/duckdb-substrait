@@ -84,16 +84,44 @@ namespace duckdb {
     // Transpilation functions (substrait -> logical)
 
     //! Transpile a substrait plan to a duckdb execution plan
-    shared_ptr<LogicalOperator> SystemPlanFromSubstraitPlan(substrait::Plan& plan);
+    unique_ptr<LogicalOperator> SystemPlanFromSubstraitPlan(substrait::Plan& plan);
 
     //! Transpile a substrait plan to a duckdb execution plan
-    shared_ptr<Relation> TranspileRootOp(const substrait::RelRoot& sop);
+    unique_ptr<LogicalOperator> TranspileRootOp(const substrait::RelRoot& sop);
 
     //! Transpile a substrait operator to a duckdb execution operator
-    shared_ptr<Relation> TranspileOp(const substrait::Rel& sop);
+    unique_ptr<LogicalOperator> TranspileOp(const substrait::Rel& sop);
 
     //! Transpile a substrait expression to a duckdb expression
     unique_ptr<ParsedExpression> TranspileExpr(const substrait::Expression &sexpr);
+
+    // >> Internal transpilation functions for operators
+    // NOTE: these are member methods because TranspileReadOp uses this->conn
+    unique_ptr<Relation> TranspileJoinOp         (const substrait::JoinRel&      sjoin);
+    unique_ptr<Relation> TranspileCrossProductOp (const substrait::CrossRel&     scross);
+    unique_ptr<Relation> TranspileFetchOp        (const substrait::FetchRel&     slimit);
+    unique_ptr<Relation> TranspileFilterOp       (const substrait::FilterRel&    sfilter);
+    unique_ptr<Relation> TranspileProjectOp      (const substrait::ProjectRel&   sproj);
+    unique_ptr<Relation> TranspileAggregateOp    (const substrait::AggregateRel& saggr);
+    unique_ptr<Relation> TranspileReadOp         (const substrait::ReadRel&      sget);
+    unique_ptr<Relation> TranspileSortOp         (const substrait::SortRel&      ssort);
+    unique_ptr<Relation> TranspileSetOp          (const substrait::SetRel&       sset);
+
+    //! Transpile Substrait Sort Order to DuckDB Order
+    OrderByNode TranspileOrder(const substrait::SortField& sordf);
+
+
+    // >> Internal transpilation functions for expressions
+    unique_ptr<ParsedExpression> TranspileSelectionExpr(const substrait::Expression& sexpr);
+    unique_ptr<ParsedExpression> TranspileIfThenExpr   (const substrait::Expression& sexpr);
+    unique_ptr<ParsedExpression> TranspileCastExpr     (const substrait::Expression& sexpr);
+    unique_ptr<ParsedExpression> TranspileInExpr       (const substrait::Expression& sexpr);
+
+    unique_ptr<ParsedExpression>
+    TranspileLiteralExpr(const substrait::Expression::Literal& slit);
+
+    unique_ptr<ParsedExpression>
+    TranspileScalarFunctionExpr(const substrait::Expression& sexpr);
 
 
     // ------------------------------
@@ -144,6 +172,9 @@ namespace duckdb {
     private:
       //! DuckDB `Connection`
       Connection&  conn;
+
+      //! DuckDB Binder, used for generating indices
+      shared_ptr<Binder> binder;
 
       //! Map of registered substrait function extensions
       FunctionMap functions_map;
