@@ -282,9 +282,25 @@ static unique_ptr<TableRef> FromSubstraitBindJSON(ClientContext &context, TableF
 //! Container for TableFnExplainSubstrait to get data from BindFnExplainSubstrait
 struct FromSubstraitFunctionData : public TableFunctionData {
 	FromSubstraitFunctionData() = default;
-	shared_ptr<Relation> plan;
+	shared_ptr<Relation>    plan;
 	unique_ptr<QueryResult> res;
-	unique_ptr<Connection> conn;
+	unique_ptr<Connection>  conn;
+};
+
+struct OptimizeMohairFunctionData : public TableFunctionData {
+	OptimizeMohairFunctionData() = default;
+	unique_ptr<LogicalOperator>  logical_plan;
+  unique_ptr<PhysicalOperator> physical_plan;
+	unique_ptr<QueryResult>      res;
+
+  bool is_optimized { false };
+  bool is_physical  { false };
+};
+
+struct ExecMohairFunctionData : public TableFunctionData {
+	ExecMohairFunctionData() = default;
+	shared_ptr<Relation>    exec_plan;
+	unique_ptr<QueryResult> res;
 };
 
 static unique_ptr<FunctionData>
@@ -301,7 +317,7 @@ BindingTranspileMohair( ClientContext&          context
 	string           plan_msg   { input.inputs[0].GetValueUnsafe<string>() };
 
 	auto result          = make_uniq<OptimizeMohairFunctionData>();
-	result->logical_plan = translator.TranslatePlanMessage(plan_msg);
+	result->logical_plan = translator.TranspilePlanMessage(plan_msg);
 
 	for (auto &column : result->logical_plan->Columns()) {
 		return_types.emplace_back(column.Type());
@@ -341,8 +357,22 @@ TableFnOptimizeMohair( ClientContext&      context
                       ,DataChunk&          output) {
 	auto &fn_data = (OptimizeMohairFunctionData &) *(data_p.bind_data);
 	if (!fn_data.res) {
-    // TODO: optimize then translate to physical plan
-    std::cout << "TODO: optimize plan" << std::endl;
+    std::cout << "optimize plan" << std::endl;
+    shared_ptr<Binder> binder = Binder::CreateBinder(context);
+    Optimizer          optimizer { *binder, context };
+
+    fn_data.logical_plan = optimizer.Optimize(std::move(fn_data.logical_plan));
+    fn_data.is_optimized = true;
+
+    std::cout << "translate logical plan to physical plan" << std::endl;
+    PhysicalPlanGenerator physical_planner { context };
+    fn_data.physical_plan = physical_planner.CreatePlan(std::move(fn_data.logical_plan));
+    fn_data.is_physical   = true;
+
+    // TODO
+    std::cout << "execute physical plan" << std::endl;
+
+    fn_data.res = fn_data.logical_plan
   }
 
 	auto result_chunk = fn_data.res->Fetch();
@@ -393,8 +423,8 @@ void InitializeTranspileMohair(Connection &con) {
 	TableFunction tablefn_mohair(
      "transpile_mohair"
     ,{ LogicalType::BLOB }
-    ,TableFnExecuteMohair
-    ,BindingTranslateMohair
+    ,TableFnOptimizeMohair
+    ,BindingTranspileMohair
   );
 
 	CreateTableFunctionInfo fninfo_mohair(tablefn_mohair);
