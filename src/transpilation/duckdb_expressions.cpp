@@ -52,7 +52,7 @@ namespace duckdb {
   using SLiteralType = substrait::Expression::Literal::LiteralTypeCase;
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateLiteralExpr(const substrait::Expression::Literal& slit) {
+  DuckDBEnginePlan::TranspileLiteralExpr(const substrait::Expression::Literal& slit) {
     Value dval;
 
     if (slit.has_null()) {
@@ -186,7 +186,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateSelectionExpr(const substrait::Expression &sexpr) {
+  DuckDBEnginePlan::TranspileSelectionExpr(const substrait::Expression &sexpr) {
     if (   !sexpr.selection().has_direct_reference()
         || !sexpr.selection().direct_reference().has_struct_field()) {
       throw InternalException("Can only have direct struct references in selections");
@@ -198,7 +198,7 @@ namespace duckdb {
   }
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateScalarFunctionExpr(const substrait::Expression& sexpr) {
+  DuckDBEnginePlan::TranspileScalarFunctionExpr(const substrait::Expression& sexpr) {
     auto function_name = FindFunction(sexpr.scalar_function().function_reference());
     function_name      = RemoveExtension(function_name);
 
@@ -209,7 +209,7 @@ namespace duckdb {
     for (auto& sarg : function_arguments) {
 
       // value expression
-      if (sarg.has_value()) { children.push_back(TranslateExpr(sarg.value())); }
+      if (sarg.has_value()) { children.push_back(TranspileExpr(sarg.value())); }
 
       // type expression
       else if (sarg.has_type()) {
@@ -354,59 +354,59 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateIfThenExpr(const substrait::Expression &sexpr) {
+  DuckDBEnginePlan::TranspileIfThenExpr(const substrait::Expression &sexpr) {
     const auto& scase = sexpr.if_then();
     auto        dcase = make_uniq<CaseExpression>();
 
     for (const auto &sif : scase.ifs()) {
       CaseCheck dif;
-      dif.when_expr = TranslateExpr(sif.if_());
-      dif.then_expr = TranslateExpr(sif.then());
+      dif.when_expr = TranspileExpr(sif.if_());
+      dif.then_expr = TranspileExpr(sif.then());
       dcase->case_checks.push_back(std::move(dif));
     }
 
-    dcase->else_expr = TranslateExpr(scase.else_());
+    dcase->else_expr = TranspileExpr(scase.else_());
     return std::move(dcase);
   }
 
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateCastExpr(const substrait::Expression &sexpr) {
+  DuckDBEnginePlan::TranspileCastExpr(const substrait::Expression &sexpr) {
     const auto& scast      = sexpr.cast();
     auto        cast_type  = SubstraitToDuckType(scast.type());
-    auto        cast_child = TranslateExpr(scast.input());
+    auto        cast_child = TranspileExpr(scast.input());
 
     return make_uniq<CastExpression>(cast_type, std::move(cast_child));
   }
 
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateInExpr(const substrait::Expression& sexpr) {
+  DuckDBEnginePlan::TranspileInExpr(const substrait::Expression& sexpr) {
     const auto &substrait_in = sexpr.singular_or_list();
 
     vector<unique_ptr<ParsedExpression>> values;
-    values.emplace_back(TranslateExpr(substrait_in.value()));
+    values.emplace_back(TranspileExpr(substrait_in.value()));
 
     for (idx_t i = 0; i < (idx_t)substrait_in.options_size(); i++) {
-      values.emplace_back(TranslateExpr(substrait_in.options(i)));
+      values.emplace_back(TranspileExpr(substrait_in.options(i)));
     }
 
     return make_uniq<OperatorExpression>(ExpressionType::COMPARE_IN, std::move(values));
   }
 
 
-  // >> Top-level transformation function
+  // >> Top-level transpilation function
   using SExprType = substrait::Expression::RexTypeCase;
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateExpr(const substrait::Expression& sexpr) {
+  DuckDBEnginePlan::TranspileExpr(const substrait::Expression& sexpr) {
     switch (sexpr.rex_type_case()) {
-      case SExprType::kLiteral:        return TranslateLiteralExpr       (sexpr.literal());
-      case SExprType::kSelection:      return TranslateSelectionExpr     (sexpr);
-      case SExprType::kScalarFunction: return TranslateScalarFunctionExpr(sexpr);
-      case SExprType::kIfThen:         return TranslateIfThenExpr        (sexpr);
-      case SExprType::kCast:           return TranslateCastExpr          (sexpr);
-      case SExprType::kSingularOrList: return TranslateInExpr            (sexpr);
+      case SExprType::kLiteral:        return TranspileLiteralExpr       (sexpr.literal());
+      case SExprType::kSelection:      return TranspileSelectionExpr     (sexpr);
+      case SExprType::kScalarFunction: return TranspileScalarFunctionExpr(sexpr);
+      case SExprType::kIfThen:         return TranspileIfThenExpr        (sexpr);
+      case SExprType::kCast:           return TranspileCastExpr          (sexpr);
+      case SExprType::kSingularOrList: return TranspileInExpr            (sexpr);
 
       case SExprType::kSubquery:
       default:
