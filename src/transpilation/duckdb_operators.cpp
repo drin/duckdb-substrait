@@ -32,7 +32,7 @@
 namespace duckdb {
 
   static duckdb::SetOperationType
-  TranslateSetOperationType(substrait::SetRel::SetOp setop) {
+  TranspileSetOperationType(substrait::SetRel::SetOp setop) {
     switch (setop) {
       case substrait::SetRel::SET_OP_UNION_ALL: {
         return duckdb::SetOperationType::UNION;
@@ -56,10 +56,18 @@ namespace duckdb {
   }
 
 
-  static duckdb::JoinType 
-  TranslateJoinType(const substrait::JoinRel& sjoin) {
+  // TODO select the right join operator type here
+  // TODO: this is where I'm stopping to test out `Relation` -> `QueryNode` ->
+  // `LogicalOperator`
+  static duckdb::LogicalJoin
+  TranspileJoinOp(const substrait::JoinRel& sjoin) {
     switch (sjoin.type()) {
-      case substrait::JoinRel::JOIN_TYPE_INNER:  return duckdb::JoinType::INNER;
+      case substrait::JoinRel::JOIN_TYPE_INNER:
+        return make_uniq<LogicalComparisonJoin>(
+           duckdb::JoinType::INNER
+          ,duckdb::LogicalOperatorType::LOGICAL_COMPARISON_JOIN
+        );
+
       case substrait::JoinRel::JOIN_TYPE_LEFT:   return duckdb::JoinType::LEFT;
       case substrait::JoinRel::JOIN_TYPE_RIGHT:  return duckdb::JoinType::RIGHT;
       case substrait::JoinRel::JOIN_TYPE_SINGLE: return duckdb::JoinType::SINGLE;
@@ -72,7 +80,7 @@ namespace duckdb {
 
 
   OrderByNode
-  DuckDBEnginePlan::TranslateOrder(const substrait::SortField& sordf) {
+  DuckDBEnginePlan::TranspileOrder(const substrait::SortField& sordf) {
     OrderType       dordertype;
     OrderByNullType dnullorder;
 
@@ -101,76 +109,73 @@ namespace duckdb {
         throw InternalException("Unsupported ordering " + to_string(sordf.direction()));
     }
 
-    return { dordertype, dnullorder, TranslateExpr(sordf.expr()) };
+    return { dordertype, dnullorder, TranspileExpr(sordf.expr()) };
   }
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateJoinOp(const substrait::JoinRel& sjoin) {
-    JoinType djointype = TranslateJoinType(sjoin);
-    unique_ptr<ParsedExpression> join_condition = TranslateExpr(sjoin.expression());
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileJoinOp(const substrait::JoinRel& sjoin) {
+    JoinType djointype = TranspileJoinType(sjoin);
+    unique_ptr<ParsedExpression> join_condition = TranspileExpr(sjoin.expression());
 
+    auto join_ndx = binder.GenerateTableIndex();
+    auto join_op  = make_uniq<
     return make_shared<JoinRelation>(
-       TranslateOp(sjoin.left())->Alias("left")
-      ,TranslateOp(sjoin.right())->Alias("right")
+       TranspileOp(sjoin.left())->Alias("left")
+      ,TranspileOp(sjoin.right())->Alias("right")
       ,std::move(join_condition)
       ,djointype
     );
   }
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateCrossProductOp(const substrait::CrossRel& scross) {
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileCrossProductOp(const substrait::CrossRel& scross) {
     return make_shared<CrossProductRelation>(
-       TranslateOp(scross.left())->Alias("left")
-      ,TranslateOp(scross.right())->Alias("right")
+       TranspileOp(scross.left())->Alias("left")
+      ,TranspileOp(scross.right())->Alias("right")
     );
   }
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateFetchOp(const substrait::FetchRel& slimit) {
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileFetchOp(const substrait::FetchRel& slimit) {
     return make_shared<LimitRelation>(
-       TranslateOp(slimit.input())
+       TranspileOp(slimit.input())
       ,slimit.count()
       ,slimit.offset()
     );
   }
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateFilterOp(const substrait::FilterRel& sfilter) {
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileFilterOp(const substrait::FilterRel& sfilter) {
     return make_shared<FilterRelation>(
-       TranslateOp(sfilter.input())
-      ,TranslateExpr(sfilter.condition())
+       TranspileOp(sfilter.input())
+      ,TranspileExpr(sfilter.condition())
     );
   }
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateProjectOp(const substrait::ProjectRel& sproj) {
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileProjectOp(const substrait::ProjectRel& sproj) {
     vector<unique_ptr<ParsedExpression>> expressions;
     for (auto &sexpr : sproj.expressions()) {
-      expressions.push_back(TranslateExpr(sexpr));
+      expressions.push_back(TranspileExpr(sexpr));
     }
 
-    vector<string> mock_aliases;
-    for (size_t i = 0; i < expressions.size(); i++) {
-      mock_aliases.push_back("expr_" + to_string(i));
-    }
+    auto proj_ndx = binder->GenerateTableIndex();
+    auto proj_op = make_uniq<LogicalProjection>(proj_ndx, std::move(expressions));
+    proj_op->AddChild(std::move(TranspileOp(sproj.input())));
 
-    return make_shared<ProjectionRelation>(
-       TranslateOp(sproj.input())
-      ,std::move(expressions)
-      ,std::move(mock_aliases)
-    );
+    return proj_op;
   }
 
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateAggregateOp(const substrait::AggregateRel& saggr) {
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileAggregateOp(const substrait::AggregateRel& saggr) {
     vector<unique_ptr<ParsedExpression>> groups, expressions;
 
     if (saggr.groupings_size() > 0) {
       for (auto &sgrp : saggr.groupings()) {
         for (auto &sgrpexpr : sgrp.grouping_expressions()) {
-          groups.push_back(TranslateExpr(sgrpexpr));
-          expressions.push_back(TranslateExpr(sgrpexpr));
+          groups.push_back(TranspileExpr(sgrpexpr));
+          expressions.push_back(TranspileExpr(sgrpexpr));
         }
       }
     }
@@ -178,7 +183,7 @@ namespace duckdb {
     for (auto &smeas : saggr.measures()) {
       vector<unique_ptr<ParsedExpression>> children;
       for (auto &sarg : smeas.measure().arguments()) {
-        children.push_back(TranslateExpr(sarg.value()));
+        children.push_back(TranspileExpr(sarg.value()));
       }
 
       auto function_name = FindFunction(smeas.measure().function_reference());
@@ -194,16 +199,16 @@ namespace duckdb {
     }
 
     return make_shared<AggregateRelation>(
-       TranslateOp(saggr.input())
+       TranspileOp(saggr.input())
       ,std::move(expressions)
       ,std::move(groups)
     );
   }
 
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateReadOp(const substrait::ReadRel& sget) {
-    shared_ptr<Relation> scan;
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileReadOp(const substrait::ReadRel& sget) {
+    unique_ptr<LogicalOperator> scan;
 
     // Find a table or view with given name
     if (sget.has_named_table()) {
@@ -256,7 +261,7 @@ namespace duckdb {
 
     // Filter predicate for scan operation
     if (sget.has_filter()) {
-      scan = make_shared<FilterRelation>(std::move(scan), TranslateExpr(sget.filter()));
+      scan = make_shared<FilterRelation>(std::move(scan), TranspileExpr(sget.filter()));
     }
 
     // Projection predicate for scan operation
@@ -282,23 +287,23 @@ namespace duckdb {
   }
 
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateSortOp(const substrait::SortRel &ssort) {
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileSortOp(const substrait::SortRel &ssort) {
     vector<OrderByNode> order_nodes;
     for (auto &sordf : ssort.sorts()) {
-      order_nodes.push_back(TranslateOrder(sordf));
+      order_nodes.push_back(TranspileOrder(sordf));
     }
 
-    return make_shared<OrderRelation>(TranslateOp(ssort.input()), std::move(order_nodes));
+    return make_shared<OrderRelation>(TranspileOp(ssort.input()), std::move(order_nodes));
   }
 
 
-  shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateSetOp(const substrait::SetRel &sset) {
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileSetOp(const substrait::SetRel &sset) {
     // TODO: see if this is necessary for some cases
     // D_ASSERT(sop.has_set());
 
-    auto  type   = TranslateSetOperationType(sset.op());
+    auto  type   = TranspileSetOperationType(sset.op());
     auto& inputs = sset.inputs();
     if (sset.inputs_size() > 2) {
       throw NotImplementedException(
@@ -306,25 +311,25 @@ namespace duckdb {
       );
     }
 
-    auto lhs = TranslateOp(inputs[0]);
-    auto rhs = TranslateOp(inputs[1]);
+    auto lhs = TranspileOp(inputs[0]);
+    auto rhs = TranspileOp(inputs[1]);
     return make_shared<SetOpRelation>(std::move(lhs), std::move(rhs), type);
   }
 
 
-  //! Translate Substrait Operations to DuckDB Relations
+  //! Transpile Substrait Operations to DuckDB Relations
   using SRelType = substrait::Rel::RelTypeCase;
-  shared_ptr<Relation> DuckDBEnginePlan::TranslateOp(const substrait::Rel& sop) {
+  unique_ptr<LogicalOperator> DuckDBEnginePlan::TranspileOp(const substrait::Rel& sop) {
     switch (sop.rel_type_case()) {
-      case SRelType::kJoin:      return TranslateJoinOp        (sop.join());
-      case SRelType::kCross:     return TranslateCrossProductOp(sop.cross());
-      case SRelType::kFetch:     return TranslateFetchOp       (sop.fetch());
-      case SRelType::kFilter:    return TranslateFilterOp      (sop.filter());
-      case SRelType::kProject:   return TranslateProjectOp     (sop.project());
-      case SRelType::kAggregate: return TranslateAggregateOp   (sop.aggregate());
-      case SRelType::kRead:      return TranslateReadOp        (sop.read());
-      case SRelType::kSort:      return TranslateSortOp        (sop.sort());
-      case SRelType::kSet:       return TranslateSetOp         (sop.set());
+      case SRelType::kJoin:      return TranspileJoinOp        (sop.join());
+      case SRelType::kCross:     return TranspileCrossProductOp(sop.cross());
+      case SRelType::kFetch:     return TranspileFetchOp       (sop.fetch());
+      case SRelType::kFilter:    return TranspileFilterOp      (sop.filter());
+      case SRelType::kProject:   return TranspileProjectOp     (sop.project());
+      case SRelType::kAggregate: return TranspileAggregateOp   (sop.aggregate());
+      case SRelType::kRead:      return TranspileReadOp        (sop.read());
+      case SRelType::kSort:      return TranspileSortOp        (sop.sort());
+      case SRelType::kSet:       return TranspileSetOp         (sop.set());
 
       default:
         throw InternalException(
@@ -334,20 +339,21 @@ namespace duckdb {
   }
 
 
-  //! Translates Substrait Plan Root To a DuckDB Relation
-  shared_ptr<Relation> DuckDBEnginePlan::TranslateRootOp(const substrait::RelRoot& sop) {
-    vector<string>                       aliases;
+  //! Transpiles Substrait Plan Root To a DuckDB Relation
+  unique_ptr<LogicalOperator>
+  DuckDBEnginePlan::TranspileRootOp(const substrait::RelRoot& sop) {
     vector<unique_ptr<ParsedExpression>> expressions;
 
     int id = 1;
     for (auto &column_name : sop.names()) {
-      aliases.push_back(column_name);
-      expressions.push_back(make_uniq<PositionalReferenceExpression>(id++));
+      expressions.push_back(make_uniq<ColumnRefExpression>(column_name));
     }
 
-    return make_shared<ProjectionRelation>(
-      TranslateOp(sop.input()), std::move(expressions), aliases
-    );
+    auto proj_ndx = binder->GenerateTableIndex();
+    auto proj_op = make_uniq<LogicalProjection>(proj_ndx, std::move(expressions));
+    proj_op->AddChild(std::move(TranspileOp(sop.input())));
+
+    return proj_op;
   }
 
 } // namespace: duckdb
