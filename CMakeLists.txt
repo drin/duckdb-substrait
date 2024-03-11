@@ -99,9 +99,9 @@ set(MOHAIR_SOURCES
     src/plans.cpp
     src/engine_duckdb.cpp
     src/translation/duckdb_expressions.cpp
-    src/translation/duckdb_operators.cpp
-    src/transpilation/duckdb_expressions.cpp
-    src/transpilation/duckdb_operators.cpp)
+    src/translation/duckdb_operators.cpp)
+    #src/transpilation/duckdb_expressions.cpp
+    #src/transpilation/duckdb_operators.cpp)
 
 # official sources for substrait integration
 set(SUBSTRAIT_EXT_SOURCES
