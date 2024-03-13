@@ -107,18 +107,6 @@ namespace duckdb {
     return functions_map[id];
   }
 
-  unique_ptr<LogicalOperator>
-  DuckDBEnginePlan::SystemPlanFromSubstraitPlan(substrait::Plan& plan) {
-    if (plan.relations().empty()) {
-      throw InvalidInputException("Substrait Plan does not have a SELECT statement");
-    }
-
-    RegisterExtensionFunctions(plan);
-
-    binder = Binder::CreateBinder(*(conn.context));
-    return TranspileRootOp(plan.relations(0).root());
-  }
-
   shared_ptr<Relation>
   DuckDBEnginePlan::EnginePlanFromSubstraitPlan(substrait::Plan& plan) {
     if (plan.relations().empty()) {
