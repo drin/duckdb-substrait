@@ -27,8 +27,7 @@
 
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/client_data.hpp"
-
-#include "duckdb/parser/parser.hpp"
+#include "duckdb/main/prepared_statement_data.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/helper.hpp"
@@ -36,6 +35,11 @@
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/common/enums/set_operation_type.hpp"
+
+#include "duckdb/parser/parser.hpp"
+#include "duckdb/planner/planner.hpp"
+#include "duckdb/optimizer/optimizer.hpp"
+#include "duckdb/execution/operator/helper/physical_result_collector.hpp"
 
 #include "substrait/plan.pb.h"
 #include "substrait/algebra.pb.h"
@@ -78,50 +82,6 @@ namespace duckdb {
 
     //! Looks up for aggregation function in functions_map
     string FindFunction(uint64_t id);
-
-
-    // ------------------------------
-    // Transpilation functions (substrait -> logical)
-
-    //! Transpile a substrait plan to a duckdb execution plan
-    unique_ptr<LogicalOperator> SystemPlanFromSubstraitPlan(substrait::Plan& plan);
-
-    //! Transpile a substrait plan to a duckdb execution plan
-    unique_ptr<LogicalOperator> TranspileRootOp(const substrait::RelRoot& sop);
-
-    //! Transpile a substrait operator to a duckdb execution operator
-    unique_ptr<LogicalOperator> TranspileOp(const substrait::Rel& sop);
-
-    //! Transpile a substrait expression to a duckdb expression
-    unique_ptr<ParsedExpression> TranspileExpr(const substrait::Expression &sexpr);
-
-    // >> Internal transpilation functions for operators
-    // NOTE: these are member methods because TranspileReadOp uses this->conn
-    unique_ptr<Relation> TranspileJoinOp         (const substrait::JoinRel&      sjoin);
-    unique_ptr<Relation> TranspileCrossProductOp (const substrait::CrossRel&     scross);
-    unique_ptr<Relation> TranspileFetchOp        (const substrait::FetchRel&     slimit);
-    unique_ptr<Relation> TranspileFilterOp       (const substrait::FilterRel&    sfilter);
-    unique_ptr<Relation> TranspileProjectOp      (const substrait::ProjectRel&   sproj);
-    unique_ptr<Relation> TranspileAggregateOp    (const substrait::AggregateRel& saggr);
-    unique_ptr<Relation> TranspileReadOp         (const substrait::ReadRel&      sget);
-    unique_ptr<Relation> TranspileSortOp         (const substrait::SortRel&      ssort);
-    unique_ptr<Relation> TranspileSetOp          (const substrait::SetRel&       sset);
-
-    //! Transpile Substrait Sort Order to DuckDB Order
-    OrderByNode TranspileOrder(const substrait::SortField& sordf);
-
-
-    // >> Internal transpilation functions for expressions
-    unique_ptr<ParsedExpression> TranspileSelectionExpr(const substrait::Expression& sexpr);
-    unique_ptr<ParsedExpression> TranspileIfThenExpr   (const substrait::Expression& sexpr);
-    unique_ptr<ParsedExpression> TranspileCastExpr     (const substrait::Expression& sexpr);
-    unique_ptr<ParsedExpression> TranspileInExpr       (const substrait::Expression& sexpr);
-
-    unique_ptr<ParsedExpression>
-    TranspileLiteralExpr(const substrait::Expression::Literal& slit);
-
-    unique_ptr<ParsedExpression>
-    TranspileScalarFunctionExpr(const substrait::Expression& sexpr);
 
 
     // ------------------------------
@@ -190,7 +150,7 @@ namespace duckdb {
     DuckDBTranslator(ClientContext& context);
 
     //! Transforms serialized Substrait Plan to DuckDB Relation
-    shared_ptr<LogicalOperator> TranspilePlanMessage(const string& serialized_msg);
+    unique_ptr<LogicalOperator> TranspilePlanRel(shared_ptr<Relation> plan_rel);
 
     //! Transforms serialized Substrait Plan to DuckDB Relation
     shared_ptr<Relation> TranslatePlanMessage(const string& serialized_msg);
