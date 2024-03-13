@@ -213,18 +213,22 @@ struct FromSubstraitFunctionData : public TableFunctionData {
 
 struct OptimizeMohairFunctionData : public TableFunctionData {
 	OptimizeMohairFunctionData() = default;
-	unique_ptr<LogicalOperator>  logical_plan;
-  unique_ptr<PhysicalOperator> physical_plan;
-	unique_ptr<QueryResult>      res;
+
+  unique_ptr<DuckDBTranslator>      translator;
+	shared_ptr<Relation>              plan_rel;
+	unique_ptr<LogicalOperator>       logical_plan;
+  shared_ptr<PreparedStatementData> plan_data;
+	unique_ptr<QueryResult>           res;
 
   bool is_optimized { false };
-  bool is_physical  { false };
 };
 
 struct ExecMohairFunctionData : public TableFunctionData {
 	ExecMohairFunctionData() = default;
-	shared_ptr<Relation>    exec_plan;
-	unique_ptr<QueryResult> res;
+
+  unique_ptr<DuckDBTranslator> translator;
+	shared_ptr<Relation>         exec_plan;
+	unique_ptr<QueryResult>      res;
 };
 
 static unique_ptr<FunctionData> SubstraitBind(ClientContext &context, TableFunctionBindInput &input,
@@ -246,43 +250,51 @@ static unique_ptr<FunctionData> SubstraitBind(ClientContext &context, TableFunct
 
 static unique_ptr<FunctionData>
 BindingTranspileMohair( ClientContext&          context
-           ,TableFunctionBindInput& input
-           ,vector<LogicalType>&    return_types
-           ,vector<string>&         names) {
+                       ,TableFunctionBindInput& input
+                       ,vector<LogicalType>&    return_types
+                       ,vector<string>&         names) {
 
 	if (input.inputs[0].IsNull()) {
 		throw BinderException("from_substrait cannot be called with a NULL parameter");
 	}
 
-  DuckDBTranslator translator { context };
-	string           plan_msg   { input.inputs[0].GetValueUnsafe<string>() };
+	auto fn_data        = make_uniq<OptimizeMohairFunctionData>();
+  fn_data->translator = make_uniq<DuckDBTranslator>(context);
+  fn_data->plan_data  = make_shared<PreparedStatementData>(StatementType::SELECT_STATEMENT);
 
-	auto result          = make_uniq<OptimizeMohairFunctionData>();
-	result->logical_plan = translator.TranspilePlanMessage(plan_msg);
+	string plan_msg { input.inputs[0].GetValueUnsafe<string>() };
+	fn_data->plan_rel     = fn_data->translator->TranslatePlanMessage(plan_msg);
+	fn_data->logical_plan = fn_data->translator->TranspilePlanRel(fn_data->plan_rel);
 
-	for (auto &column : result->logical_plan->Columns()) {
+	for (auto &column : fn_data->plan_rel->Columns()) {
+    // For duckdb framework to do something with
 		return_types.emplace_back(column.Type());
 		names.emplace_back(column.Name());
+
+    // For us to further build PreparedStatementData
+    // (probably affects our ResultCollector)
+    fn_data->plan_data->types.emplace_back(column.Type());
+    fn_data->plan_data->names.emplace_back(column.Name());
 	}
 
-	return std::move(result);
+	return std::move(fn_data);
 }
 
 static unique_ptr<FunctionData>
 BindingTranslateMohair( ClientContext&          context
-           ,TableFunctionBindInput& input
-           ,vector<LogicalType>&    return_types
-           ,vector<string>&         names) {
+                       ,TableFunctionBindInput& input
+                       ,vector<LogicalType>&    return_types
+                       ,vector<string>&         names) {
 
 	if (input.inputs[0].IsNull()) {
 		throw BinderException("from_substrait cannot be called with a NULL parameter");
 	}
 
-  DuckDBTranslator translator { context };
-	string           plan_msg   { input.inputs[0].GetValueUnsafe<string>() };
+	string plan_msg { input.inputs[0].GetValueUnsafe<string>() };
+	auto   result   = make_uniq<ExecMohairFunctionData>();
 
-	auto result       = make_uniq<ExecMohairFunctionData>();
-	result->exec_plan = translator.TranslatePlanMessage(plan_msg);
+  result->translator = make_uniq<DuckDBTranslator>(context);
+	result->exec_plan  = result->translator->TranslatePlanMessage(plan_msg);
 
 	for (auto &column : result->exec_plan->Columns()) {
 		return_types.emplace_back(column.Type());
@@ -322,23 +334,87 @@ TableFnOptimizeMohair( ClientContext&      context
                       ,TableFunctionInput& data_p
                       ,DataChunk&          output) {
 	auto &fn_data = (OptimizeMohairFunctionData &) *(data_p.bind_data);
+
 	if (!fn_data.res) {
-    std::cout << "optimize plan" << std::endl;
     shared_ptr<Binder> binder = Binder::CreateBinder(context);
-    Optimizer          optimizer { *binder, context };
 
-    fn_data.logical_plan = optimizer.Optimize(std::move(fn_data.logical_plan));
+    // >> Optimization phase
+    std::cout << "[Optimization] >>" << std::endl;
+    std::cout << "\t[Optimizer]: declare" << std::endl;
+    Optimizer optimizer { *binder, context };
+
+    std::cout << "\t[Optimizer]: optimize" << std::endl;
     fn_data.is_optimized = true;
+    fn_data.logical_plan = optimizer.Optimize(std::move(fn_data.logical_plan));
 
-    std::cout << "translate logical plan to physical plan" << std::endl;
+    // >> Planning phase
+    std::cout << "[Planning] >>" << std::endl;
+    std::cout << "\t[Planner]: declare" << std::endl;
     PhysicalPlanGenerator physical_planner { context };
-    fn_data.physical_plan = physical_planner.CreatePlan(std::move(fn_data.logical_plan));
-    fn_data.is_physical   = true;
 
-    // TODO
-    std::cout << "execute physical plan" << std::endl;
+    std::cout << "\t[Planner]: create physical plan" << std::endl;
+    fn_data.plan_data->plan = physical_planner.CreatePlan(
+      std::move(fn_data.logical_plan)
+    );
 
-    fn_data.res = fn_data.logical_plan
+    std::cout << "\t[Planner]: define collector" << std::endl;
+    auto result_collector = PhysicalResultCollector::GetResultCollector(
+      context, *(fn_data.plan_data)
+    );
+
+    // >> Execution phase
+    std::cout << "[Execution] >>" << std::endl;
+    constexpr bool dry_run       { false };
+    Executor       plan_executor { context };
+
+    std::cout << "\t[Executor]: initialize" << std::endl;
+    plan_executor.Initialize(std::move(result_collector));
+
+    std::cout << "\t[Executor]: execute first task" << std::endl;
+    auto exec_result = plan_executor.ExecuteTask(dry_run);
+
+    std::cout << "\t[Executor]: execute remaining tasks" << std::endl;
+    while (exec_result != PendingExecutionResult::RESULT_READY) {
+      switch (exec_result) {
+        case PendingExecutionResult::RESULT_NOT_READY:
+        case PendingExecutionResult::RESULT_READY:
+          break;
+
+        case PendingExecutionResult::BLOCKED:
+          std::cout << "\t[Executor]: blocked" << std::endl;
+          break;
+
+        case PendingExecutionResult::NO_TASKS_AVAILABLE:
+          std::cout << "\t[Executor]: waiting for tasks" << std::endl;
+          break;
+
+        case PendingExecutionResult::EXECUTION_ERROR:
+          std::cerr << "\t[Executor]: execution error: "
+                    << plan_executor.GetError().Message()
+                    << std::endl
+          ;
+          return;
+
+        default:
+          std::cerr << "\t[Executor]: unknown result" << std::endl;
+          return;
+      }
+
+      exec_result = plan_executor.ExecuteTask(dry_run);
+    }
+
+    std::cout << "\t[Executor]: checking for result" << std::endl;
+    if (exec_result == PendingExecutionResult::RESULT_READY) {
+
+      if (plan_executor.HasResultCollector()) {
+        std::cout << "\t[Executor]: gather result" << std::endl;
+        fn_data.res = std::move(plan_executor.GetResult());
+      }
+      else {
+        std::cerr << "\t[Executor]: missing result collector" << std::endl;
+        return;
+      }
+    }
   }
 
 	auto result_chunk = fn_data.res->Fetch();
