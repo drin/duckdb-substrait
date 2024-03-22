@@ -6,82 +6,126 @@
 //
 //===----------------------------------------------------------------------===//
 
+
+// ------------------------------
+// Dependencies
 #pragma once
 
-#include "duckdb/common/types/hash.hpp"
-#include <substrait/type.pb.h>
 #include <unordered_map>
+#include <substrait/type.pb.h>
+
+#include "duckdb/common/types/hash.hpp"
+
+
+// ------------------------------
+// Dependencies
 
 namespace duckdb {
 
-struct SubstraitCustomFunction {
-	SubstraitCustomFunction(string name_p, vector<string> arg_types_p)
-	    : name(std::move(name_p)), arg_types(std::move(arg_types_p)) {};
+  // >> Type forwards
+  struct SubstraitCustomFunction;
 
-	SubstraitCustomFunction() = default;
-	bool operator==(const SubstraitCustomFunction &other) const {
-		return name == other.name && arg_types == other.arg_types;
-	}
-	string GetName();
-	string name;
-	vector<string> arg_types;
-};
-//! Here we define function extensions
-class SubstraitFunctionExtensions {
-public:
-	SubstraitFunctionExtensions(SubstraitCustomFunction function_p, string extension_path_p)
-	    : function(std::move(function_p)), extension_path(std::move(extension_path_p)) {};
-	SubstraitFunctionExtensions() = default;
 
-	string GetExtensionURI() const;
-	bool IsNative() const;
+  // >> Hash functors
+  //! Hash functor for "*" (any arguments) substrait functions
+  struct HashSubstraitFunctionsName {
+    size_t operator()(SubstraitCustomFunction const& custom_function) const noexcept {
+      return Hash(custom_function.name.c_str());
+    }
+  };
 
-	SubstraitCustomFunction function;
-	string extension_path;
-};
+  //! Hash functor for "?" (repeatable argument) and regular substrait functions
+  struct HashSubstraitFunctions {
+    size_t operator()(SubstraitCustomFunction const& custom_function) const noexcept {
+      // Hash the function arguments
+      auto& fn_argtypes = custom_function.arg_types;
 
-struct HashSubstraitFunctions {
-	size_t operator()(SubstraitCustomFunction const &custom_function) const noexcept {
-		// Hash Name
-		auto hash_name = Hash(custom_function.name.c_str());
-		// Hash Input Types
-		auto &i_types = custom_function.arg_types;
-		auto hash_type = Hash(i_types[0].c_str());
-		for (idx_t i = 1; i < i_types.size(); i++) {
-			hash_type = CombineHash(hash_type, Hash(i_types[i].c_str()));
-		}
-		// Combine name and inputs
-		return CombineHash(hash_name, hash_type);
-	}
-};
+      auto hashed_argtypes = Hash(fn_argtypes[0].c_str());
+      for (idx_t arg_ndx = 1; arg_ndx < fn_argtypes.size(); arg_ndx++) {
+        hashed_argtypes = CombineHash(hashed_argtypes, Hash(fn_argtypes[arg_ndx].c_str()));
+      }
 
-struct HashSubstraitFunctionsName {
-	size_t operator()(SubstraitCustomFunction const &custom_function) const noexcept {
-		// Hash Name
-		return Hash(custom_function.name.c_str());
-	}
-};
+      // Combine hashes for the function name and its argument types
+      auto hashed_name = Hash(custom_function.name.c_str());
+      return CombineHash(hashed_name, hashed_argtypes);
+    }
+  };
 
-class SubstraitCustomFunctions {
-public:
-	SubstraitCustomFunctions();
-	SubstraitFunctionExtensions Get(const string &name, const vector<substrait::Type> &types) const;
-	static vector<string> GetTypes(const vector<substrait::Type> &types);
-	void Initialize();
 
-private:
-	// For Regular Functions
-	std::unordered_map<SubstraitCustomFunction, SubstraitFunctionExtensions, HashSubstraitFunctions> custom_functions;
-	// For * Functions
-	std::unordered_map<SubstraitCustomFunction, SubstraitFunctionExtensions, HashSubstraitFunctionsName>
-	    any_arg_functions;
-	// For ? Functions
-	// When we have an argument ending with ? it means this argument can repeat many times
-	std::unordered_map<SubstraitCustomFunction, SubstraitFunctionExtensions, HashSubstraitFunctions> many_arg_functions;
+  // >> Classes
+  //! Class to describe an individual substrait function
+  struct SubstraitCustomFunction {
 
-	void InsertCustomFunction(string name_p, vector<string> types_p, string file_path);
-	void InsertAllFunctions(const vector<vector<string>> &all_types, vector<idx_t> &indices, int depth, string &name_p,
-	                        string &file_path);
-};
+    // Constructors
+    SubstraitCustomFunction() = default;
+    SubstraitCustomFunction(string name_p, vector<string> arg_types_p)
+        : name(std::move(name_p)), arg_types(std::move(arg_types_p)) {}
+
+    // Functions
+    bool operator==(const SubstraitCustomFunction &other) const {
+      return name == other.name && arg_types == other.arg_types;
+    }
+
+    string GetName();
+
+    // Attributes
+    string         name;
+    vector<string> arg_types;
+  };
+
+  //! Class to describe a substrait function extension (a URI for substrait function info)
+  struct SubstraitFunctionExtensions {
+
+    // Constructors
+    SubstraitFunctionExtensions() = default;
+    SubstraitFunctionExtensions(SubstraitCustomFunction function_p, string extension_path_p)
+      : function(std::move(function_p)), extension_path(std::move(extension_path_p)) {}
+
+    // Functions
+    string GetExtensionURI() const;
+    bool   IsNative() const;
+
+    // Attributes
+    SubstraitCustomFunction function;
+    string                  extension_path;
+  };
+
+  //! Class that acts as a registry for substrait functions and their extensions
+  struct SubstraitCustomFunctions {
+    // type aliases for convenience
+    using SubstraitTypeVec  = vector<::substrait::Type>;
+
+    using SubstraitFnMap    = std::unordered_map< SubstraitCustomFunction
+                                                 ,SubstraitFunctionExtensions
+                                                 ,HashSubstraitFunctions     >;
+
+    using SubstraitAnyFnMap = std::unordered_map< SubstraitCustomFunction
+                                                 ,SubstraitFunctionExtensions
+                                                 ,HashSubstraitFunctionsName>;
+
+    // Constructors
+    SubstraitCustomFunctions();
+
+    // Methods
+    void Initialize();
+    SubstraitFunctionExtensions Get(const string& name, const SubstraitTypeVec& types) const;
+
+    // Static methods
+	  static vector<string> GetTypes(const vector<substrait::Type>& types);
+
+    private:
+      // Private attributes
+      SubstraitFnMap    custom_functions;   // For regular functions
+      SubstraitAnyFnMap any_arg_functions;  // For "*"     functions
+      SubstraitFnMap    many_arg_functions; // For "?"     functions
+
+      // Private methods
+      void InsertCustomFunction(string name_p, vector<string> types_p, string file_path);
+      void InsertAllFunctions( const vector<vector<string>>& all_types
+                              ,vector<idx_t>&                indices
+                              ,int                           depth
+                              ,string&                       name_p
+                              ,string&                       file_path);
+  };
 
 } // namespace duckdb
