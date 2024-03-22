@@ -21,66 +21,63 @@
 
 #include "plans.hpp"
 
-#include "google/protobuf/util/json_util.h"
-
 
 // ------------------------------
 // Macros and Type Aliases
 
 
-// Functions
-using duckdb::google::protobuf::util::JsonStringToMessage;
-
-
 // ------------------------------
-// Structs and Classes
+// Classes and structs
 
-namespace duckdb {
+namespace mohair {
 
-  //! Constructor for DuckDBTranslator
-  DuckDBTranslator::DuckDBTranslator(ClientContext &ctxt): context(ctxt) {
-    // initialize a new connection for the translator to use
-    t_conn = make_uniq<Connection>(*ctxt.db);
+  // ------------------------------
+  // Methods for SubstraitFunctionMap
 
-    // create an http state, but I don't know what this is for
-    auto http_state = HTTPState::TryGetState(*(t_conn->context));
-    http_state->Reset();
+  //! Register extension functions from the substrait plan in the function map
+  void SubstraitFunctionMap::RegisterExtensionFunctions(substrait::Plan& plan) {
+    for (auto &sext : plan.extensions()) {
+      if (!sext.has_extension_function()) { continue; }
+
+      const auto fn_anchor = sext.extension_function().function_anchor();
+      fn_map[fn_anchor]    = sext.extension_function().name();
+    }
   }
 
-  // >> Entry points for substrait plan (json or binary) -> duckdb logical plan
-  unique_ptr<LogicalOperator>
-  DuckDBTranslator::TranspilePlanRel(shared_ptr<Relation> plan_rel) {
-    // Transform Relation to QueryNode and wrap in a SQLStatement
-    auto plan_wrapper  = make_uniq<SelectStatement>();
-    plan_wrapper->node = plan_rel->GetQueryNode();
+  string SubstraitFunctionMap::FindExtensionFunction(uint64_t id) {
+    if (fn_map.find(id) == fn_map.end()) {
+      throw duckdb::InternalException(
+        "Could not find aggregate function " + std::to_string(id)
+      );
+    }
 
-    // Create a planner to go from SQLStatement -> LogicalOperator
-    Planner planner { context };
-    planner.CreatePlan(std::move(plan_wrapper));
-    return std::move(planner.plan);
+    return fn_map[id];
   }
 
-  // >> Entry points for substrait plan (json or binary) -> duckdb execution plan
-  shared_ptr<Relation>
-  DuckDBTranslator::TranslatePlanMessage(const string &serialized_msg) {
-    if (not plan.ParseFromString(serialized_msg)) {
+
+  // ------------------------------
+  // Builder Functions for SystemPlan
+
+  //! Builder function that constructs SystemPlan from a serialized substrait message
+  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitMessage(const string& serialized_msg) {
+    auto plan = duckdb::make_uniq<substrait::Plan>();
+    if (not plan->ParseFromString(serialized_msg)) {
       throw std::runtime_error("Error parsing serialized Substrait Plan");
     }
 
-    DuckDBEnginePlan engine_plan { *t_conn };
-    return engine_plan.EnginePlanFromSubstraitPlan(plan);
+    return plan;
   }
 
-  shared_ptr<Relation>
-  DuckDBTranslator::TranslatePlanJson(const string &json_msg) {
-    google::protobuf::util::Status status = JsonStringToMessage(json_msg, &plan);
+  //! Builder function that constructs SystemPlan from a JSON-formatted substrait message
+  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg) {
+    auto plan = duckdb::make_uniq<substrait::Plan>();
 
+    Status status = JsonStringToMessage(json_msg, plan.get());
     if (not status.ok()) {
       throw std::runtime_error("Error parsing JSON Substrait Plan: " + status.ToString());
     }
 
-    DuckDBEnginePlan engine_plan { *t_conn };
-    return engine_plan.EnginePlanFromSubstraitPlan(plan);
+    return plan;
   }
 
-} // namespace: duckdb
+} // namespace: mohair
