@@ -52,7 +52,7 @@ namespace duckdb {
   using SLiteralType = substrait::Expression::Literal::LiteralTypeCase;
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateLiteralExpr(const substrait::Expression::Literal& slit) {
+  DuckDBTranslator::TranslateLiteralExpr(const substrait::Expression::Literal& slit) {
     Value dval;
 
     if (slit.has_null()) {
@@ -186,7 +186,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateSelectionExpr(const substrait::Expression &sexpr) {
+  DuckDBTranslator::TranslateSelectionExpr(const substrait::Expression &sexpr) {
     if (   !sexpr.selection().has_direct_reference()
         || !sexpr.selection().direct_reference().has_struct_field()) {
       throw InternalException("Can only have direct struct references in selections");
@@ -198,8 +198,9 @@ namespace duckdb {
   }
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateScalarFunctionExpr(const substrait::Expression& sexpr) {
-    auto function_name = FindFunction(sexpr.scalar_function().function_reference());
+  DuckDBTranslator::TranslateScalarFunctionExpr(const substrait::Expression& sexpr) {
+    auto function_id   = sexpr.scalar_function().function_reference();
+    auto function_name = functions_map->FindExtensionFunction(function_id);
     function_name      = RemoveExtension(function_name);
 
     vector<unique_ptr<ParsedExpression>> children;
@@ -341,7 +342,7 @@ namespace duckdb {
       D_ASSERT(enum_expressions.size() == 1);
 
       auto& subfield = enum_expressions[0];
-      VerifyCorrectExtractSubfield(subfield);
+      AssertValidDateSubfield(subfield);
 
       auto constant_expression = make_uniq<ConstantExpression>(Value(subfield));
       children.insert(children.begin(), std::move(constant_expression));
@@ -354,7 +355,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateIfThenExpr(const substrait::Expression &sexpr) {
+  DuckDBTranslator::TranslateIfThenExpr(const substrait::Expression &sexpr) {
     const auto& scase = sexpr.if_then();
     auto        dcase = make_uniq<CaseExpression>();
 
@@ -371,7 +372,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateCastExpr(const substrait::Expression &sexpr) {
+  DuckDBTranslator::TranslateCastExpr(const substrait::Expression &sexpr) {
     const auto& scast      = sexpr.cast();
     auto        cast_type  = SubstraitToDuckType(scast.type());
     auto        cast_child = TranslateExpr(scast.input());
@@ -381,7 +382,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateInExpr(const substrait::Expression& sexpr) {
+  DuckDBTranslator::TranslateInExpr(const substrait::Expression& sexpr) {
     const auto &substrait_in = sexpr.singular_or_list();
 
     vector<unique_ptr<ParsedExpression>> values;
@@ -391,7 +392,9 @@ namespace duckdb {
       values.emplace_back(TranslateExpr(substrait_in.options(i)));
     }
 
-    return make_uniq<OperatorExpression>(ExpressionType::COMPARE_IN, std::move(values));
+    return make_uniq<OperatorExpression>(
+      ExpressionType::COMPARE_IN, std::move(values)
+    );
   }
 
 
@@ -399,7 +402,7 @@ namespace duckdb {
   using SExprType = substrait::Expression::RexTypeCase;
 
   unique_ptr<ParsedExpression>
-  DuckDBEnginePlan::TranslateExpr(const substrait::Expression& sexpr) {
+  DuckDBTranslator::TranslateExpr(const substrait::Expression& sexpr) {
     switch (sexpr.rex_type_case()) {
       case SExprType::kLiteral:        return TranslateLiteralExpr       (sexpr.literal());
       case SExprType::kSelection:      return TranslateSelectionExpr     (sexpr);
@@ -407,7 +410,6 @@ namespace duckdb {
       case SExprType::kIfThen:         return TranslateIfThenExpr        (sexpr);
       case SExprType::kCast:           return TranslateCastExpr          (sexpr);
       case SExprType::kSingularOrList: return TranslateInExpr            (sexpr);
-
       case SExprType::kSubquery:
       default:
         throw InternalException(
