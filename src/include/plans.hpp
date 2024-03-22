@@ -20,26 +20,11 @@
 // Dependencies
 #pragma once
 
-#include <memory>
 #include <string>
 #include <unordered_map>
-#include <iostream> // for debugging
 
-#include "duckdb/main/connection.hpp"
-#include "duckdb/main/client_data.hpp"
-#include "duckdb/main/prepared_statement_data.hpp"
-
-#include "duckdb/common/exception.hpp"
-#include "duckdb/common/helper.hpp"
-#include "duckdb/common/http_state.hpp"
-#include "duckdb/common/types.hpp"
-#include "duckdb/common/types/value.hpp"
-#include "duckdb/common/enums/set_operation_type.hpp"
-
-#include "duckdb/parser/parser.hpp"
-#include "duckdb/planner/planner.hpp"
-#include "duckdb/optimizer/optimizer.hpp"
-#include "duckdb/execution/operator/helper/physical_result_collector.hpp"
+#include "duckdb.hpp"
+#include "google/protobuf/util/json_util.h"
 
 #include "substrait/plan.pb.h"
 #include "substrait/algebra.pb.h"
@@ -52,121 +37,65 @@
 using std::string;
 using std::unordered_map;
 
-// Convenience aliases
-using FunctionMap = unordered_map<uint64_t, string>;
+// protobuf types and functions from duckdb namespace
+using duckdb::unique_ptr;
+using duckdb::shared_ptr;
+using duckdb::google::protobuf::util::Status;
+using duckdb::google::protobuf::util::JsonStringToMessage;
 
 
-namespace duckdb {
+// ------------------------------
+// Classes and structs
 
-  //! Execution plan (physical plan) for DuckDB
-  struct DuckDBEnginePlan {
-    // >> Constructors
+namespace mohair {
 
-    //! Initializes a Translator instance
-    DuckDBEnginePlan(Connection& conn);
+  //! Alias template for transpilation functions
+  template <typename LogicalOpType>
+  using TranspileSysPlanFnType = std::function<substrait::Plan(LogicalOpType&)>;
 
+  template <typename LogicalOpType>
+  using TranspileSubPlanFnType = std::function<LogicalOpType(substrait::Plan&)>;
 
-    // >> Convenience functions
+  //! Templated class to hold a substrait plan and a "system plan".
+  /** The system plan is flexibly represented by the templated type so that any particular
+   *  system can translate to the preferred level of abstraction.
+   */
+  template <typename LogicalOpType>
+  struct SystemPlan {
+    //! A system-level query plan represented as substrait
+    shared_ptr<substrait::Plan> substrait;
 
-    //! Reusable function that updates function extensions given a substrait plan
-    void RegisterExtensionFunctions(substrait::Plan& plan);
-
-    //! Check that the subfield is supported by duckdb
-    void VerifyCorrectExtractSubfield(const string& subfield);
-
-    //! Normalize function name by dropping extension ID
-    string RemoveExtension(string& function_name);
-
-    //! Remap substrait function name to duckdb function name
-    string RemapFunctionName(string& function_name);
-
-    //! Looks up for aggregation function in functions_map
-    string FindFunction(uint64_t id);
+    //! A system-level query plan represented by a specific query engine
+    shared_ptr<LogicalOpType>   engine;
 
 
-    // ------------------------------
-    // Translation functions (substrait -> physical)
-
-    //! Translate a substrait plan to a duckdb execution plan
-    shared_ptr<Relation> EnginePlanFromSubstraitPlan(substrait::Plan& plan);
-
-    //! Translate a substrait plan to a duckdb execution plan
-    shared_ptr<Relation> TranslateRootOp(const substrait::RelRoot& sop);
-
-    //! Translate a substrait operator to a duckdb execution operator
-    shared_ptr<Relation> TranslateOp(const substrait::Rel& sop);
-
-    //! Translate a substrait expression to a duckdb expression
-    unique_ptr<ParsedExpression> TranslateExpr(const substrait::Expression &sexpr);
-
-    // >> Internal translation functions for operators
-    // NOTE: these are member methods because TranslateReadOp uses this->conn
-    shared_ptr<Relation> TranslateJoinOp         (const substrait::JoinRel&      sjoin);
-    shared_ptr<Relation> TranslateCrossProductOp (const substrait::CrossRel&     scross);
-    shared_ptr<Relation> TranslateFetchOp        (const substrait::FetchRel&     slimit);
-    shared_ptr<Relation> TranslateFilterOp       (const substrait::FilterRel&    sfilter);
-    shared_ptr<Relation> TranslateProjectOp      (const substrait::ProjectRel&   sproj);
-    shared_ptr<Relation> TranslateAggregateOp    (const substrait::AggregateRel& saggr);
-    shared_ptr<Relation> TranslateReadOp         (const substrait::ReadRel&      sget);
-    shared_ptr<Relation> TranslateSortOp         (const substrait::SortRel&      ssort);
-    shared_ptr<Relation> TranslateSetOp          (const substrait::SetRel&       sset);
-
-    //! Translate Substrait Sort Order to DuckDB Order
-    OrderByNode TranslateOrder(const substrait::SortField& sordf);
+    SystemPlan( shared_ptr<substrait::Plan> s_plan
+               ,shared_ptr<LogicalOpType>   e_plan)
+      :  substrait(s_plan), engine(e_plan) {}
 
 
-    // >> Internal translation functions for expressions
-    unique_ptr<ParsedExpression> TranslateSelectionExpr(const substrait::Expression& sexpr);
-    unique_ptr<ParsedExpression> TranslateIfThenExpr   (const substrait::Expression& sexpr);
-    unique_ptr<ParsedExpression> TranslateCastExpr     (const substrait::Expression& sexpr);
-    unique_ptr<ParsedExpression> TranslateInExpr       (const substrait::Expression& sexpr);
-
-    unique_ptr<ParsedExpression>
-    TranslateLiteralExpr(const substrait::Expression::Literal& slit);
-
-    unique_ptr<ParsedExpression>
-    TranslateScalarFunctionExpr(const substrait::Expression& sexpr);
-
-
-    // >> Member variables
-    private:
-      //! DuckDB `Connection`
-      Connection&  conn;
-
-      //! DuckDB Binder, used for generating indices
-      shared_ptr<Binder> binder;
-
-      //! Map of registered substrait function extensions
-      FunctionMap functions_map;
-
-      //! Remap substrait function names to DuckDB function names
-      static const unordered_map<string, string> function_names_remap;
-      static const case_insensitive_set_t        valid_extract_subfields;
+    // TODO:
+    // arrow::Table Execute();
   };
 
-  //! Translator from substrait plan to DuckDB plans
-  struct DuckDBTranslator {
-    //! Initializes a Translator instance
-    DuckDBTranslator(ClientContext& context);
+  //! Builder function that constructs SystemPlan from a serialized substrait message
+  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitMessage(const string& serialized_msg);
 
-    //! Transforms serialized Substrait Plan to DuckDB Relation
-    unique_ptr<LogicalOperator> TranspilePlanRel(shared_ptr<Relation> plan_rel);
+  //! Builder function that constructs SystemPlan from a JSON-formatted substrait message
+  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg);
 
-    //! Transforms serialized Substrait Plan to DuckDB Relation
-    shared_ptr<Relation> TranslatePlanMessage(const string& serialized_msg);
+} // namespace: mohair
 
-    //! Transforms json-formatted Substrait Plan to DuckDB Relation
-    shared_ptr<Relation> TranslatePlanJson(const string& json_msg);
 
-    private:
-      //! DuckDB `ClientContext` inherited from initial DuckDB Connection
-      ClientContext &context;
+// >> Code for managing substrait function extensions. Likely to move in the future.
+namespace mohair {
 
-      //! DuckDB `Connection` initiated by `DuckDBTranslator`
-      unique_ptr<Connection> t_conn;
+  struct SubstraitFunctionMap {
+    //! Registry of substrait function extensions used in substrait plan
+    unordered_map<uint64_t, string> fn_map;
 
-      //! Substrait Plan
-      substrait::Plan plan;
+    void   RegisterExtensionFunctions(substrait::Plan& plan);
+    string FindExtensionFunction(uint64_t id);
   };
 
-} // namespace duckdb
+} // namespace: mohair
