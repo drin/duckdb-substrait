@@ -72,7 +72,7 @@ namespace duckdb {
 
 
   OrderByNode
-  DuckDBEnginePlan::TranslateOrder(const substrait::SortField& sordf) {
+  DuckDBTranslator::TranslateOrder(const substrait::SortField& sordf) {
     OrderType       dordertype;
     OrderByNullType dnullorder;
 
@@ -105,7 +105,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateJoinOp(const substrait::JoinRel& sjoin) {
+  DuckDBTranslator::TranslateJoinOp(const substrait::JoinRel& sjoin) {
     JoinType djointype = TranslateJoinType(sjoin);
     unique_ptr<ParsedExpression> join_condition = TranslateExpr(sjoin.expression());
 
@@ -118,7 +118,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateCrossProductOp(const substrait::CrossRel& scross) {
+  DuckDBTranslator::TranslateCrossProductOp(const substrait::CrossRel& scross) {
     return make_shared<CrossProductRelation>(
        TranslateOp(scross.left())->Alias("left")
       ,TranslateOp(scross.right())->Alias("right")
@@ -126,7 +126,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateFetchOp(const substrait::FetchRel& slimit) {
+  DuckDBTranslator::TranslateFetchOp(const substrait::FetchRel& slimit) {
     return make_shared<LimitRelation>(
        TranslateOp(slimit.input())
       ,slimit.count()
@@ -135,7 +135,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateFilterOp(const substrait::FilterRel& sfilter) {
+  DuckDBTranslator::TranslateFilterOp(const substrait::FilterRel& sfilter) {
     return make_shared<FilterRelation>(
        TranslateOp(sfilter.input())
       ,TranslateExpr(sfilter.condition())
@@ -143,7 +143,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateProjectOp(const substrait::ProjectRel& sproj) {
+  DuckDBTranslator::TranslateProjectOp(const substrait::ProjectRel& sproj) {
     vector<unique_ptr<ParsedExpression>> expressions;
     for (auto &sexpr : sproj.expressions()) {
       expressions.push_back(TranslateExpr(sexpr));
@@ -163,7 +163,7 @@ namespace duckdb {
 
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateAggregateOp(const substrait::AggregateRel& saggr) {
+  DuckDBTranslator::TranslateAggregateOp(const substrait::AggregateRel& saggr) {
     vector<unique_ptr<ParsedExpression>> groups, expressions;
 
     if (saggr.groupings_size() > 0) {
@@ -181,10 +181,9 @@ namespace duckdb {
         children.push_back(TranslateExpr(sarg.value()));
       }
 
-      auto function_name = FindFunction(smeas.measure().function_reference());
-      if (function_name == "count" && children.empty()) {
-        function_name = "count_star";
-      }
+      auto function_id   = smeas.measure().function_reference();
+      auto function_name = functions_map->FindExtensionFunction(function_id);
+      if (function_name == "count" && children.empty()) { function_name = "count_star"; }
 
       expressions.push_back(
         make_uniq<FunctionExpression>(
@@ -202,13 +201,12 @@ namespace duckdb {
 
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateReadOp(const substrait::ReadRel& sget) {
+  DuckDBTranslator::TranslateReadOp(const substrait::ReadRel& sget) {
     shared_ptr<Relation> scan;
-
     // Find a table or view with given name
     if (sget.has_named_table()) {
-      try         { scan = conn.Table(sget.named_table().names(0)); }
-      catch (...) { scan = conn.View (sget.named_table().names(0)); }
+      try         { scan = t_conn->Table(sget.named_table().names(0)); }
+      catch (...) { scan = t_conn->View (sget.named_table().names(0)); }
     }
 
     // Otherwise, try scanning from list of parquet files
@@ -245,9 +243,10 @@ namespace duckdb {
       string name = "parquet_" + StringUtil::GenerateRandomName();
       named_parameter_map_t named_parameters({{"binary_as_string", Value::BOOLEAN(false)}});
 
-      scan = conn.TableFunction(
-        "parquet_scan", {Value::LIST(parquet_files)}, named_parameters
-      )->Alias(name);
+      scan = t_conn->TableFunction( "parquet_scan"
+                                   ,{Value::LIST(parquet_files)}
+                                   ,named_parameters
+                                  )->Alias(name);
     }
 
     else {
@@ -270,7 +269,9 @@ namespace duckdb {
         aliases.push_back("expr_" + to_string(expr_idx++));
 
         // TODO make sure nothing else is in there
-        expressions.push_back(make_uniq<PositionalReferenceExpression>(sproj.field() + 1));
+        expressions.push_back(
+          make_uniq<PositionalReferenceExpression>(sproj.field() + 1)
+        );
       }
 
       scan = make_shared<ProjectionRelation>(
@@ -283,7 +284,7 @@ namespace duckdb {
 
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateSortOp(const substrait::SortRel &ssort) {
+  DuckDBTranslator::TranslateSortOp(const substrait::SortRel &ssort) {
     vector<OrderByNode> order_nodes;
     for (auto &sordf : ssort.sorts()) {
       order_nodes.push_back(TranslateOrder(sordf));
@@ -294,7 +295,7 @@ namespace duckdb {
 
 
   shared_ptr<Relation>
-  DuckDBEnginePlan::TranslateSetOp(const substrait::SetRel &sset) {
+  DuckDBTranslator::TranslateSetOp(const substrait::SetRel &sset) {
     // TODO: see if this is necessary for some cases
     // D_ASSERT(sop.has_set());
 
@@ -314,7 +315,7 @@ namespace duckdb {
 
   //! Translate Substrait Operations to DuckDB Relations
   using SRelType = substrait::Rel::RelTypeCase;
-  shared_ptr<Relation> DuckDBEnginePlan::TranslateOp(const substrait::Rel& sop) {
+  shared_ptr<Relation> DuckDBTranslator::TranslateOp(const substrait::Rel& sop) {
     switch (sop.rel_type_case()) {
       case SRelType::kJoin:      return TranslateJoinOp        (sop.join());
       case SRelType::kCross:     return TranslateCrossProductOp(sop.cross());
@@ -335,8 +336,8 @@ namespace duckdb {
 
 
   //! Translates Substrait Plan Root To a DuckDB Relation
-  shared_ptr<Relation> DuckDBEnginePlan::TranslateRootOp(const substrait::RelRoot& sop) {
-    vector<string>                       aliases;
+  shared_ptr<Relation> DuckDBTranslator::TranslateRootOp(const substrait::RelRoot& sop) {
+    vector<string> aliases;
     vector<unique_ptr<ParsedExpression>> expressions;
 
     int id = 1;
@@ -348,6 +349,26 @@ namespace duckdb {
     return make_shared<ProjectionRelation>(
       TranslateOp(sop.input()), std::move(expressions), aliases
     );
+  }
+
+
+  // >> Entry points into the functions implemented here
+  unique_ptr<DuckSystemPlan>
+  DuckDBTranslator::TranslatePlanMessage(const string& serialized_msg) {
+    auto plan = mohair::SubstraitPlanFromSubstraitMessage(serialized_msg);
+    functions_map->RegisterExtensionFunctions(*plan);
+
+    auto engine_plan = TranslateRootOp(plan->relations(0).root());
+    return make_uniq<DuckSystemPlan>(std::move(plan), engine_plan);
+  }
+
+  unique_ptr<DuckSystemPlan>
+  DuckDBTranslator::TranslatePlanJson(const string& json_msg) {
+    auto plan        = mohair::SubstraitPlanFromSubstraitJson(json_msg);
+    functions_map->RegisterExtensionFunctions(*plan);
+
+    auto engine_plan = TranslateRootOp(plan->relations(0).root());
+    return make_uniq<DuckSystemPlan>(std::move(plan), engine_plan);
   }
 
 } // namespace: duckdb
