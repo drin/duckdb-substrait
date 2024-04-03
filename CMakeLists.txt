@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.28.3)
 
 # Set extension name here
 set(TARGET_NAME substrait)
@@ -94,12 +94,27 @@ set(SUBSTRAIT_SOURCES
     third_party/substrait/substrait/type_expressions.pb.cc
     third_party/substrait/substrait/extensions/extensions.pb.cc)
 
-set(EXTENSION_SOURCES
-    src/to_substrait.cpp
+# custom sources for mohair integration
+set(MOHAIR_SOURCES
+    src/plans.cpp
+    src/engine_duckdb.cpp
+    src/translation/duckdb_expressions.cpp
+    src/translation/duckdb_operators.cpp)
+    #src/transpilation/duckdb_expressions.cpp
+    #src/transpilation/duckdb_operators.cpp)
+
+# official sources for substrait integration
+set(SUBSTRAIT_EXT_SOURCES
     src/from_substrait.cpp
+    src/to_substrait.cpp)
+
+# primary sources first, then others
+set(EXTENSION_SOURCES
     src/substrait_extension.cpp
     src/custom_extensions.cpp
     src/custom_extensions_generated.cpp
+    ${MOHAIR_SOURCES}
+    ${SUBSTRAIT_EXT_SOURCES}
     ${SUBSTRAIT_SOURCES}
     ${PROTOBUF_SOURCES})
 
