@@ -170,7 +170,7 @@ namespace duckdb {
   }
 
   static void ToSubFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-    auto &data = (ToSubstraitFunctionData &)*data_p.bind_data;
+    auto &data = (ToSubstraitFunctionData &) *data_p.bind_data;
     if (data.finished) {
       return;
     }
@@ -287,14 +287,15 @@ namespace duckdb {
     if (input.inputs[0].IsNull()) {
       throw BinderException("from_substrait cannot be called with a NULL parameter");
     }
-    string plan_msg         { input.inputs[0].GetValueUnsafe<string>()                      };
-    bool   enable_optimizer { SetOptimizationOption(context.config, input.named_parameters) };
+    string plan_msg { input.inputs[0].GetValueUnsafe<string>() };
 
     // Prepare a FunctionData instance to return
     auto fn_data = make_uniq<FnDataSubstraitTranslation>();
     fn_data->translator = make_uniq<DuckDBTranslator>(context);
     fn_data->sys_plan   = fn_data->translator->TranslatePlanMessage(plan_msg);
     fn_data->plan_data  = std::make_shared<PreparedStatementData>(StatementType::SELECT_STATEMENT);
+
+    fn_data->enable_optimizer = SetOptimizationOption(context.config, input.named_parameters);
 
     // For us to further build PreparedStatementData
     // (probably affects our ResultCollector)
