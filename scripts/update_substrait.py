@@ -3,46 +3,103 @@
 
 import os
 import shutil
-from os import walk
 
-GITHUB_TAG = "8f8d85e63501fc1a085d9585c6566e9c33b81264" # V0.39
-# Change to substrait folder
-sub_folder  = os.path.join(os.path.dirname(os.path.realpath(__file__)),'..','third_party','substrait')
-os.chdir(sub_folder)
+from pathlib import Path
 
 
-# Delete Current CPP files
-shutil.rmtree(os.path.join(sub_folder,'substrait'))
+# ------------------------------
+# Functions
 
-# Clone Proto Files
-os.system("git clone https://github.com/substrait-io/substrait git-sub")
-git_folder =  os.path.join(sub_folder,'git-sub')
+# NOTE: this is a function in case more sophisticated cleanup is desirable in the future
+def CleanupDir(dirpath):
+    """ Deletes the directory :dirpath:. """
+    shutil.rmtree(dirpath)
 
-# Generate Proto Files on a specific git tag
-os.chdir(git_folder)
-os.system("git checkout " + GITHUB_TAG)
-os.chdir(sub_folder)
 
-proto_folder =  os.path.join(git_folder,'proto')
-substrait_proto_folder = os.path.join(proto_folder,'substrait')
-substrait_extensions_proto_folder = os.path.join(substrait_proto_folder,'extensions')
+def PrepareRepo(repo_dirpath, repo_url, repo_tag):
+    """ Clones the repository to a temporary directory to be cleaned up afterwards. """
 
-os.mkdir("substrait")
-os.mkdir("substrait/extensions")
+    # Clone Proto Files on a specific git tag
+    os.system(f'git clone --branch {repo_tag} -- {repo_url} {repo_dirpath}')
 
-# Generate all files
-proto_sub_list = next(walk(substrait_proto_folder), (None, None, []))[2]
 
-proto_sub_extensions = next(walk(substrait_extensions_proto_folder), (None, None, []))[2]
+def GenerateProtobufCode(proto_rootdir, src_rootdir, proto_fpath):
+    """ Command that compiles :proto_fpath: and outputs to :src_rootdir:. """
 
-# /usr/local/bin/protoc
-print("Protoc version" + os.popen('protoc --version').read())
+    os.system(f'protoc -I={proto_rootdir} --cpp_out={src_rootdir} {proto_fpath}')
 
-for proto in proto_sub_list:
-    os.system("protoc -I="+ proto_folder+ " --cpp_out="+sub_folder +" "+ os.path.join(substrait_proto_folder,proto))
 
-for proto in proto_sub_extensions:
-    os.system("protoc -I="+ proto_folder+ " --cpp_out="+sub_folder +" "+ os.path.join(substrait_extensions_proto_folder,proto))
+def GenerateSubstraitCode(thirdparty_rootdir):
+    # Define reference variables
+    proj_name = 'substrait'
+    pkg_name  = 'substrait'
+    repo_url  = 'https://github.com/substrait-io/substrait'
+    repo_tag  = 'v0.48.0'
 
-# Delete Git Folder
-shutil.rmtree(git_folder)
+    # e.g. .../third_party/substrait
+    proj_dirpath = thirdparty_rootdir / proj_name
+    repo_dirpath = thirdparty_rootdir / proj_name / f'git-{pkg_name}'
+    pkg_dirpath  = thirdparty_rootdir / proj_name / pkg_name
+
+    CleanupDir(pkg_dirpath)
+    PrepareRepo(repo_dirpath, repo_url, repo_tag)
+
+    # Create output directory for generated code
+    os.makedirs(pkg_dirpath / 'extensions')
+
+    # Create directory structure for source files
+    proto_rootdir = repo_dirpath  / 'proto'
+
+    # Generate code for each protobuf definition file
+    for proto_dpath, _, proto_fnames in os.walk(proto_rootdir / 'substrait'):
+        for proto_fname in proto_fnames:
+            proto_fpath = os.path.join(proto_dpath, proto_fname)
+            GenerateProtobufCode(proto_rootdir, proj_dirpath, proto_fpath)
+
+    CleanupDir(repo_dirpath)
+
+
+def GenerateMohairCode(thirdparty_rootdir):
+    # Define reference variables
+    proj_name = 'mohair'
+    pkg_name  = 'mohair'
+    repo_url  = 'https://github.com/drin/mohair-protocol'
+    repo_tag  = 'feat-skytether-engine'
+
+    # e.g. .../third_party/substrait
+    proj_dirpath = thirdparty_rootdir / proj_name
+    repo_dirpath = thirdparty_rootdir / proj_name / f'git-{pkg_name}'
+    pkg_dirpath  = thirdparty_rootdir / proj_name / pkg_name
+
+    CleanupDir(pkg_dirpath)
+    PrepareRepo(repo_dirpath, repo_url, repo_tag)
+
+    # Create output directory for generated code
+    os.makedirs(pkg_dirpath)
+
+    # Create directory structure for source files
+    proto_rootdir = repo_dirpath  / 'proto'
+
+    # Generate code for each protobuf definition file
+    for proto_dpath, _, proto_fnames in os.walk(proto_rootdir / 'mohair'):
+        for proto_fname in proto_fnames:
+            proto_fpath = os.path.join(proto_dpath, proto_fname)
+            GenerateProtobufCode(proto_rootdir, proj_dirpath, proto_fpath)
+
+    CleanupDir(repo_dirpath)
+
+
+# ------------------------------
+# Main Logic
+
+if __name__ == '__main__':
+    script_fpath    = Path(__file__).resolve()
+    root_dirpath    = script_fpath.parent.parent
+    project_dirpath = root_dirpath / 'third_party'
+
+    # /usr/local/bin/protoc
+    protoc_version = os.popen('protoc --version').read()
+    print(f'Protoc version: {protoc_version}')
+
+    GenerateSubstraitCode(project_dirpath)
+    GenerateMohairCode(project_dirpath)
