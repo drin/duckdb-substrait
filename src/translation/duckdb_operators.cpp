@@ -25,11 +25,28 @@
 // ------------------------------
 // Macros and Type Aliases
 
+using NamedTable = substrait::ReadRel::NamedTable;
+using LocalFiles = substrait::ReadRel::LocalFiles;
+
 
 // ------------------------------
 // Functions
 
 namespace duckdb {
+
+  //! Normalization of an Arrow URI path to a table name
+  string TableAliasForArrowFile(const std::string& uri_path) {
+    string table_alias { uri_path };
+
+    // NOTE: replace system characters with ones that play nice at a higher level
+    for (uint32_t ndx = 0; ndx < table_alias.size(); ++ndx) {
+      // TODO: can't do string literal comparisons
+      if      (table_alias[ndx] == '/') { table_alias[ndx] = '.'; }
+      else if (table_alias[ndx] == ';') { table_alias[ndx] = '-'; }
+    }
+
+    return table_alias;
+  }
 
   static duckdb::SetOperationType
   TranslateSetOperationType(substrait::SetRel::SetOp setop) {
@@ -201,54 +218,105 @@ namespace duckdb {
 
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateReadOp(const substrait::ReadRel& sget) {
-    shared_ptr<Relation> scan;
-    // Find a table or view with given name
-    if (sget.has_named_table()) {
-      try         { scan = t_conn->Table(sget.named_table().names(0)); }
-      catch (...) { scan = t_conn->View (sget.named_table().names(0)); }
-    }
+  DuckDBTranslator::ScanNamedTable(const NamedTable& named_table) {
+      try         { return t_conn->Table(named_table.names(0)); }
+      catch (...) { return t_conn->View (named_table.names(0)); }
+  }
 
-    // Otherwise, try scanning from list of parquet files
-    else if (sget.has_local_files()) {
-      vector<Value> parquet_files;
 
-      auto local_file_items = sget.local_files().items();
-      for (auto &current_file : local_file_items) {
-        if (current_file.has_parquet()) {
+  shared_ptr<Relation>
+  DuckDBTranslator::ScanFileListParquet(const LocalFiles& local_files) {
+    vector<Value> parquet_files;
 
-          if (current_file.has_uri_file()) {
-            parquet_files.emplace_back(current_file.uri_file());
-          }
-
-          else if (current_file.has_uri_path()) {
-            parquet_files.emplace_back(current_file.uri_path());
-          }
-
-          else {
-            throw NotImplementedException(
-              "Unsupported type for file path, Only uri_file and uri_path are "
-              "currently supported"
-            );
-          }
-        }
-
-        else {
-          throw NotImplementedException(
-            "Unsupported type of local file for read operator on substrait"
-          );
-        }
+    auto& local_file_items = local_files.items();
+    for (auto &current_file : local_file_items) {
+      if (current_file.has_uri_file()) {
+        parquet_files.emplace_back(current_file.uri_file());
       }
 
-      string name = "parquet_" + StringUtil::GenerateRandomName();
-      named_parameter_map_t named_parameters({{"binary_as_string", Value::BOOLEAN(false)}});
+      else if (current_file.has_uri_path()) {
+        parquet_files.emplace_back(current_file.uri_path());
+      }
 
-      scan = t_conn->TableFunction( "parquet_scan"
-                                   ,{Value::LIST(parquet_files)}
-                                   ,named_parameters
-                                  )->Alias(name);
+      else {
+        throw NotImplementedException(
+          "Unsupported type for file path, Only uri_file and uri_path are "
+          "currently supported"
+        );
+      }
     }
 
+    string scan_alias {
+      "parquet_" + StringUtil::GenerateRandomName()
+    };
+
+    named_parameter_map_t named_parameters({
+      { "binary_as_string", Value::BOOLEAN(false) }
+    });
+
+    return (
+      t_conn->TableFunction(
+                 "parquet_scan", {Value::LIST(parquet_files)}, named_parameters
+              )
+            ->Alias(scan_alias)
+    );
+  }
+
+
+  shared_ptr<Relation>
+  DuckDBTranslator::ScanFileListArrow(const LocalFiles& local_files) {
+    vector<Value> arrow_files;
+    string        table_name;
+
+    auto& local_file_items = local_files.items();
+    for (auto &current_file : local_file_items) {
+      if (current_file.has_uri_path()) {
+        arrow_files.emplace_back(current_file.uri_path());
+        table_name = TableAliasForArrowFile(current_file.uri_path());
+      }
+
+      else {
+        throw NotImplementedException("Only uri_path is supported for arrow file paths");
+      }
+    }
+
+    // We expect the arrow files to contain arrow stream formatted data
+    return (
+      t_conn->TableFunction("scan_arrows_file", {Value::LIST(arrow_files)})
+            ->Alias(table_name)
+    );
+  }
+
+
+  using SFileFormatType = LocalFiles::FileOrFiles::FileFormatCase;
+  shared_ptr<Relation>
+  DuckDBTranslator::ScanFileList(const LocalFiles& local_files) {
+    // TODO: currently, all files must be the same format
+    switch (local_files.items(0).file_format_case()) {
+      case SFileFormatType::kParquet:
+        return ScanFileListParquet(local_files);
+        break;
+
+      case SFileFormatType::kArrow:
+        return ScanFileListArrow(local_files);
+        break;
+
+      case SFileFormatType::kExtension:
+      default:
+        throw duckdb::NotImplementedException(
+          "Unsupported type of local file for read operator on substrait"
+        );
+    }
+  }
+
+
+  shared_ptr<Relation>
+  DuckDBTranslator::TranslateReadOp(const substrait::ReadRel& sget) {
+
+    // Construct a scan relation based on the ReadRel's source type
+    shared_ptr<Relation> scan;
+    if      (sget.has_named_table()) { scan = ScanNamedTable(sget.named_table()); }
+    else if (sget.has_local_files()) { scan =   ScanFileList(sget.local_files()); }
     else {
       throw NotImplementedException("Unsupported type of read operator for substrait");
     }
@@ -317,16 +385,16 @@ namespace duckdb {
   using SRelType = substrait::Rel::RelTypeCase;
   shared_ptr<Relation> DuckDBTranslator::TranslateOp(const substrait::Rel& sop) {
     switch (sop.rel_type_case()) {
-      case SRelType::kJoin:      return TranslateJoinOp        (sop.join());
-      case SRelType::kCross:     return TranslateCrossProductOp(sop.cross());
-      case SRelType::kFetch:     return TranslateFetchOp       (sop.fetch());
-      case SRelType::kFilter:    return TranslateFilterOp      (sop.filter());
-      case SRelType::kProject:   return TranslateProjectOp     (sop.project());
-      case SRelType::kAggregate: return TranslateAggregateOp   (sop.aggregate());
-      case SRelType::kRead:      return TranslateReadOp        (sop.read());
-      case SRelType::kSort:      return TranslateSortOp        (sop.sort());
-      case SRelType::kSet:       return TranslateSetOp         (sop.set());
-
+      case SRelType::kJoin:          return TranslateJoinOp        (sop.join());
+      case SRelType::kCross:         return TranslateCrossProductOp(sop.cross());
+      case SRelType::kFetch:         return TranslateFetchOp       (sop.fetch());
+      case SRelType::kFilter:        return TranslateFilterOp      (sop.filter());
+      case SRelType::kProject:       return TranslateProjectOp     (sop.project());
+      case SRelType::kAggregate:     return TranslateAggregateOp   (sop.aggregate());
+      case SRelType::kRead:          return TranslateReadOp        (sop.read());
+      case SRelType::kSort:          return TranslateSortOp        (sop.sort());
+      case SRelType::kSet:           return TranslateSetOp         (sop.set());
+      case SRelType::kExtensionLeaf:
       default:
         throw InternalException(
           "Unsupported relation type " + to_string(sop.rel_type_case())
