@@ -159,6 +159,19 @@ namespace duckdb {
 
     // >> Internal functions
     private:
+      // Helpers for TranslateReadOp
+      shared_ptr<Relation>
+      ScanNamedTable(const substrait::ReadRel::NamedTable& named_table);
+
+      shared_ptr<Relation>
+      ScanFileListParquet(const substrait::ReadRel::LocalFiles& local_files);
+
+      shared_ptr<Relation>
+      ScanFileListArrow(const substrait::ReadRel::LocalFiles& local_files);
+
+      shared_ptr<Relation>
+      ScanFileList(const substrait::ReadRel::LocalFiles& local_files);
+
       shared_ptr<Relation> TranslateRootOp(const substrait::RelRoot& sop);
       shared_ptr<Relation> TranslateOp    (const substrait::Rel&     sop);
 
