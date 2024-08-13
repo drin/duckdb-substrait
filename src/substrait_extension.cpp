@@ -146,16 +146,19 @@ namespace duckdb {
     VerifySubstraitRoundtrip(query_plan, con, data, serialized, true);
   }
 
-  static DuckDBToSubstrait InitPlanExtractor(ClientContext &context, ToSubstraitFunctionData &data, Connection &new_conn,
-                                             unique_ptr<LogicalOperator> &query_plan) {
+  static DuckDBToSubstrait
+  InitPlanExtractor( ClientContext&               context
+                    ,ToSubstraitFunctionData&     data
+                    ,Connection&                  new_conn
+                    ,unique_ptr<LogicalOperator>& query_plan) {
     // The user might want to disable the optimizer of the new connection
-    new_conn.context->config.enable_optimizer = data.enable_optimizer;
+    new_conn.context->config.enable_optimizer      = data.enable_optimizer;
     new_conn.context->config.use_replacement_scans = false;
 
     // We want for sure to disable the internal compression optimizations.
     // These are DuckDB specific, no other system implements these. Also,
     // respect the user's settings if they chose to disable any specific optimizers.
-    //
+
     // The InClauseRewriter optimization converts large `IN` clauses to a
     // "mark join" against a `ColumnDataCollection`, which may not make
     // sense in other systems and would complicate the conversion to Substrait.
@@ -169,8 +172,13 @@ namespace duckdb {
     return DuckDBToSubstrait(context, *query_plan, data.strict);
   }
 
-  static void ToSubFunctionInternal(ClientContext &context, ToSubstraitFunctionData &data, DataChunk &output,
-                                    Connection &new_conn, unique_ptr<LogicalOperator> &query_plan, string &serialized) {
+  static void
+  ToSubFunctionInternal( ClientContext&               context
+                        ,ToSubstraitFunctionData&     data
+                        ,DataChunk&                   output
+                        ,Connection&                  new_conn
+                        ,unique_ptr<LogicalOperator>& query_plan
+                        ,string&                      serialized) {
     output.SetCardinality(1);
     auto transformer_d2s = InitPlanExtractor(context, data, new_conn, query_plan);
     serialized = transformer_d2s.SerializeToString();
@@ -182,11 +190,9 @@ namespace duckdb {
     if (data.finished) { return; }
 
     auto new_conn = Connection(*context.db);
-
     unique_ptr<LogicalOperator> query_plan;
     string serialized;
     ToSubFunctionInternal(context, data, output, new_conn, query_plan, serialized);
-
     data.finished = true;
 
     if (!context.config.query_verification_enabled) { return; }
@@ -200,8 +206,13 @@ namespace duckdb {
     VerifyJSONRoundtrip(query_plan, new_conn, data, serialized);
   }
 
-  static void ToJsonFunctionInternal(ClientContext &context, ToSubstraitFunctionData &data, DataChunk &output,
-                                     Connection &new_conn, unique_ptr<LogicalOperator> &query_plan, string &serialized) {
+  static void
+  ToJsonFunctionInternal( ClientContext&               context
+                         ,ToSubstraitFunctionData&     data
+                         ,DataChunk&                   output
+                         ,Connection&                  new_conn
+                         ,unique_ptr<LogicalOperator>& query_plan
+                         ,string&                      serialized) {
     output.SetCardinality(1);
     auto transformer_d2s = InitPlanExtractor(context, data, new_conn, query_plan);
     serialized = transformer_d2s.SerializeToJson();
@@ -240,36 +251,16 @@ namespace duckdb {
     unique_ptr<Connection>  conn;
   };
 
-  struct OptimizeMohairFunctionData : public TableFunctionData {
-    OptimizeMohairFunctionData() = default;
-
-    unique_ptr<DuckDBTranslator>      translator;
-    shared_ptr<Relation>              plan_rel;
-    unique_ptr<LogicalOperator>       logical_plan;
-    shared_ptr<PreparedStatementData> plan_data;
-    unique_ptr<QueryResult>           res;
-
-    bool is_optimized { false };
-  };
-
-  struct ExecMohairFunctionData : public TableFunctionData {
-    ExecMohairFunctionData() = default;
-
-    unique_ptr<DuckDBTranslator> translator;
-    shared_ptr<Relation>         exec_plan;
-    unique_ptr<QueryResult>      res;
-  };
-
   static unique_ptr<FunctionData> SubstraitBind(ClientContext &context, TableFunctionBindInput &input,
                                                 vector<LogicalType> &return_types, vector<string> &names, bool is_json) {
-    auto result = make_uniq<FromSubstraitFunctionData>();
-
-    result->conn = make_uniq<Connection>(*context.db);
     if (input.inputs[0].IsNull()) {
       throw BinderException("from_substrait cannot be called with a NULL parameter");
     }
 
     string serialized = input.inputs[0].GetValueUnsafe<string>();
+    auto   result     = make_uniq<FromSubstraitFunctionData>();
+
+    result->conn = make_uniq<Connection>(*context.db);
     result->plan = SubstraitPlanToDuckDBRel(*result->conn, serialized, is_json);
     for (auto &column : result->plan->Columns()) {
       return_types.emplace_back(column.Type());
@@ -284,8 +275,11 @@ namespace duckdb {
     return SubstraitBind(context, input, return_types, names, false);
   }
 
-  static unique_ptr<FunctionData> FromSubstraitBindJSON(ClientContext &context, TableFunctionBindInput &input,
-                                                        vector<LogicalType> &return_types, vector<string> &names) {
+  static unique_ptr<FunctionData>
+  FromSubstraitBindJSON( ClientContext&          context
+                        ,TableFunctionBindInput& input
+                        ,vector<LogicalType>&    return_types
+                        ,vector<string>&         names) {
     return SubstraitBind(context, input, return_types, names, true);
   }
 
@@ -315,10 +309,9 @@ namespace duckdb {
 
     // Prepare a FunctionData instance to return
     auto fn_data = make_uniq<FnDataSubstraitTranslation>();
-    fn_data->translator = make_uniq<DuckDBTranslator>(context);
-    fn_data->sys_plan   = fn_data->translator->TranslatePlanMessage(plan_msg);
-    fn_data->plan_data  = std::make_shared<PreparedStatementData>(StatementType::SELECT_STATEMENT);
-
+    fn_data->translator       = make_uniq<DuckDBTranslator>(context);
+    fn_data->sys_plan         = fn_data->translator->TranslatePlanMessage(plan_msg);
+    fn_data->plan_data        = std::make_shared<PreparedStatementData>(StatementType::SELECT_STATEMENT);
     fn_data->enable_optimizer = GetOptimizationOption(context.config, input.named_parameters);
 
     // For us to further build PreparedStatementData
@@ -465,7 +458,8 @@ namespace duckdb {
 
   //! Create a TableFunction, "from_substrait", then register it with the catalog
   void InitializeFromSubstrait(const Connection &con) {
-    TableFunction from_sub_func("from_substrait"
+    TableFunction from_sub_func(
+       "from_substrait"
       ,{ LogicalType::BLOB }
       ,FromSubFunction
       ,FromSubstraitBind
@@ -479,7 +473,8 @@ namespace duckdb {
 
   //! Create a TableFunction, "from_substrait_json", then register it with the catalog
   void InitializeFromSubstraitJSON(const Connection &con) {
-    TableFunction from_sub_func_json("from_substrait_json"
+    TableFunction from_sub_func_json(
+       "from_substrait_json"
       ,{ LogicalType::VARCHAR }
       ,FromSubFunction
       ,FromSubstraitBindJSON
