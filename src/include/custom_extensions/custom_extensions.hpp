@@ -104,14 +104,25 @@ namespace duckdb {
                                                  ,HashSubstraitFunctionsName>;
 
     // Constructors
-    SubstraitCustomFunctions();
+    SubstraitCustomFunctions() = default;
+
+    SubstraitCustomFunctions(SubstraitCustomFunctions& other)
+      :  custom_functions(other.custom_functions)
+        ,any_arg_functions(other.any_arg_functions)
+        ,many_arg_functions(other.many_arg_functions) {}
+
+    SubstraitCustomFunctions(SubstraitCustomFunctions&& other)
+      :  custom_functions(std::move(other.custom_functions))
+        ,any_arg_functions(std::move(other.any_arg_functions))
+        ,many_arg_functions(std::move(other.many_arg_functions)) {}
 
     // Methods
-    void Initialize();
     SubstraitFunctionExtensions Get(const string& name, const SubstraitTypeVec& types) const;
 
     // Static methods
 	  static vector<string> GetTypes(const vector<substrait::Type>& types);
+
+    static SubstraitCustomFunctions InitializedForDuckDB();
 
     private:
       // Private attributes
