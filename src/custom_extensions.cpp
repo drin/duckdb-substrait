@@ -18,83 +18,117 @@ string TransformTypes(const substrait::Type &type) {
 }
 
 vector<string> GetAllTypes() {
-	return {{"bool"},
-	        {"i8"},
-	        {"i16"},
-	        {"i32"},
-	        {"i64"},
-	        {"fp32"},
-	        {"fp64"},
-	        {"string"},
-	        {"binary"},
-	        {"timestamp"},
-	        {"date"},
-	        {"time"},
-	        {"interval_year"},
-	        {"interval_day"},
-	        {"timestamp_tz"},
-	        {"uuid"},
-	        {"varchar"},
-	        {"fixed_binary"},
-	        {"decimal"},
-	        {"precision_timestamp"},
-	        {"precision_timestamp_tz"}};
+	return {
+     {"bool"}
+    ,{"i8"}                 , {"i16"}         , {"i32"}         , {"i64"}
+    ,{"fp32"}               , {"fp64"}
+    ,{"string"}             , {"binary"}
+    ,{"timestamp"}          , {"date"}        , {"time"}
+    ,{"interval_year"}      , {"interval_day"}, {"timestamp_tz"}
+    ,{"uuid"}
+    ,{"varchar"}            , {"fixed_binary"}, {"decimal"}
+    ,{"precision_timestamp"}, {"precision_timestamp_tz"}
+  };
+}
+
+bool IsAnyParamType(const string& param_type) {
+  return param_type == "any1" || param_type == "unknown" || param_type == "any";
+}
+
+bool IsManyArgFn(vector<string>& param_types) {
+  auto& first_ptype = param_types[0];
+  if (first_ptype.empty() or first_ptype.back() != '?') { return false; }
+
+  // All parameter types of a many_argument function are: (1) equal and (2) end with '?'
+  for (std::string::size_type type_ndx = 1; type_ndx < param_types.size(); ++type_ndx) {
+    auto& param_type = param_types[type_ndx];
+
+    if (param_type.empty() or param_type.back() != '?' or first_ptype != param_type) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // Recurse over the whole shebang
-void SubstraitCustomFunctions::InsertAllFunctions(const vector<vector<string>> &all_types, vector<idx_t> &indices,
-                                                  int depth, string &name, string &file_path) {
-	if (depth == indices.size()) {
-		vector<string> types;
-		for (idx_t i = 0; i < indices.size(); i++) {
-			auto type = all_types[i][indices[i]];
-			type = StringUtil::Replace(type, "boolean", "bool");
-			types.push_back(type);
-		}
-		if (types.empty()) {
-			any_arg_functions[{name, types}] = {{name, types}, std::move(file_path)};
-		} else {
-			bool many_arg = false;
-			string type = types[0];
-			for (auto &t : types) {
-				if (!t.empty() && t[t.size() - 1] == '?') {
-					// If all types are equal and they end with ? we have a many_argument function
-					many_arg = type == t;
-				}
-			}
-			if (many_arg) {
-				many_arg_functions[{name, types}] = {{name, types}, std::move(file_path)};
-			} else {
-				custom_functions[{name, types}] = {{name, types}, std::move(file_path)};
-			}
-		}
+void SubstraitCustomFunctions::InsertCustomFunction( string&        fn_name
+                                                    ,string&        ext_fpath
+                                                    ,vector<string> param_types) {
+  SubstraitCustomFunction       custom_fn     { name, param_types };
+  SubstraitFunctionExtensions&& custom_fn_ext { custom_fn, std::move(file_path) };
 
-		return;
-	}
-	for (int i = 0; i < all_types[depth].size(); ++i) {
-		indices[depth] = i;
-		InsertAllFunctions(all_types, indices, depth + 1, name, file_path);
-	}
+  // If there were no parameters, register a variadic function signature
+  if (param_types.empty()) { any_arg_functions[custom_fn] = custom_fn_ext; }
+
+  // If there were many identical parameters suffixed with '?', register a
+  // "many-argument" function signature
+  else if (IsManyArgFn(param_types)) { many_arg_functions[custom_fn] = custom_fn_ext; }
+
+  // Otherwise, register a standard function signature
+  else { custom_functions[custom_fn] = custom_fn_ext; }
 }
 
-void SubstraitCustomFunctions::InsertCustomFunction(string name_p, vector<string> types_p, string file_path) {
-	auto types = std::move(types_p);
-	vector<vector<string>> all_types;
-	for (auto &t : types) {
-		if (t == "any1" || t == "unknown" || t == "any") {
-			all_types.emplace_back(GetAllTypes());
-		} else {
-			all_types.push_back({t});
-		}
-	}
-	// Get the number of dimensions
-	idx_t num_arguments = all_types.size();
+//! Given a matrix of parameter types, register all acceptable substrait function signatures.
+// The matrix's first dimension is for function parameters, the second dimension is for
+// acceptable types of a particular parameter
+void SubstraitCustomFunctions::InsertAllFunctions( const vector<vector<string>>& fn_param_types
+                                                  ,vector<idx_t>&                ptype_indices
+                                                  ,int                           param_ndx
+                                                  ,string&                       name
+                                                  ,string&                       file_path) {
+  // With the given parameter types (each type determined by `ptype_indices`)
+  if (param_ndx == ptype_indices.size()) {
+    vector<string> types;
 
-	// Create a vector to hold the indices
-	vector<idx_t> idx(num_arguments, 0);
+    // Grab the type string for each parameter
+    // (use `ptype_indices` to index into `fn_param_types`)
+    for (idx_t i = 0; i < ptype_indices.size(); i++) {
+      auto type = fn_param_types[i][ptype_indices[i]];
+      types.push_back(StringUtil::Replace(type, "boolean", "bool"));
+    }
+
+    // Then, register the function signature (and extension)
+    InsertCustomFunction(name, file_path, types);
+
+    return;
+  }
+
+  // For each acceptable type of the current parameter, recurse on the next parameter
+  for (int sig_ndx = 0; sig_ndx < fn_param_types[param_ndx].size(); ++sig_ndx) {
+    ptype_indices[param_ndx] = sig_ndx;
+    InsertAllFunctions(fn_param_types, ptype_indices, param_ndx + 1, name, file_path);
+  }
+
+}
+
+void SubstraitCustomFunctions::InsertFunctionExtension( string         name_p
+                                                       ,vector<string> types_p
+                                                       ,string         file_path) {
+  // A vector of param types as specified by config
+	auto cfg_param_types = std::move(types_p);
+
+  // A vector of actual param types (after expansion)
+	vector<vector<string>> fn_param_types;
+	for (auto &param_type : cfg_param_types) {
+    // Expand an `any` type to all possible parameter types
+		if (IsAnyParamType(param_type)) { fn_param_types.emplace_back(GetAllTypes()); }
+
+    // Push the specified param type only (single-element vector)
+    else { fn_param_types.push_back({t}); }
+	}
+
+	// Get the number of dimensions
+	idx_t count_params = fn_param_types.size();
+
+  // A vector of integers that represents a counter of function signatures. Whenever a
+  // signature is inserted into the custom function maps, `fn_sig_idx` is incremented.
+  // For example, { 2, 0 }, a two parameter signature that we have inserted two of:
+  // { 0, 0 } and { 1, 0 }
+	vector<idx_t> fn_sig_idx(count_params, 0);
 
 	// Call the helper function with initial depth 0
-	InsertAllFunctions(all_types, idx, 0, name_p, file_path);
+	InsertAllFunctions(fn_param_types, fn_sig_idx, 0, name_p, file_path);
 }
 
 string SubstraitCustomFunction::GetName() {
@@ -119,10 +153,6 @@ string SubstraitFunctionExtensions::GetExtensionURI() const {
 bool SubstraitFunctionExtensions::IsNative() const {
 	return extension_path == "native";
 }
-
-SubstraitCustomFunctions::SubstraitCustomFunctions() {
-	Initialize();
-};
 
 vector<string> SubstraitCustomFunctions::GetTypes(const vector<substrait::Type> &types) {
 	vector<string> transformed_types;
