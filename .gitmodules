@@ -1,0 +1,3 @@
+[submodule "substrait/function-extensions"]
+	path = substrait/function-extensions
+	url = https://github.com/drin/substrait-function-extensions.git
