@@ -52,22 +52,6 @@ bool IsManyArgFn(vector<string>& param_types) {
 }
 
 // Recurse over the whole shebang
-void SubstraitCustomFunctions::InsertCustomFunction( string&        fn_name
-                                                    ,string&        ext_fpath
-                                                    ,vector<string> param_types) {
-  SubstraitCustomFunction       custom_fn     { name, param_types };
-  SubstraitFunctionExtensions&& custom_fn_ext { custom_fn, std::move(file_path) };
-
-  // If there were no parameters, register a variadic function signature
-  if (param_types.empty()) { any_arg_functions[custom_fn] = custom_fn_ext; }
-
-  // If there were many identical parameters suffixed with '?', register a
-  // "many-argument" function signature
-  else if (IsManyArgFn(param_types)) { many_arg_functions[custom_fn] = custom_fn_ext; }
-
-  // Otherwise, register a standard function signature
-  else { custom_functions[custom_fn] = custom_fn_ext; }
-}
 
 //! Given a matrix of parameter types, register all acceptable substrait function signatures.
 // The matrix's first dimension is for function parameters, the second dimension is for
@@ -102,6 +86,26 @@ void SubstraitCustomFunctions::InsertAllFunctions( const vector<vector<string>>&
 
 }
 
+//! Inserts a substrait function with the given information into a registry
+void SubstraitCustomFunctions::InsertCustomFunction( string         fn_name
+                                                    ,string         ext_fpath
+                                                    ,vector<string> param_types) {
+  SubstraitCustomFunction       custom_fn     { name, param_types };
+  SubstraitFunctionExtensions&& custom_fn_ext { custom_fn, std::move(file_path) };
+
+  // If there were no parameters, register a variadic function signature
+  if (param_types.empty()) { any_arg_functions[custom_fn] = custom_fn_ext; }
+
+  // If there were many identical parameters suffixed with '?', register a
+  // "many-argument" function signature
+  else if (IsManyArgFn(param_types)) { many_arg_functions[custom_fn] = custom_fn_ext; }
+
+  // Otherwise, register a standard function signature
+  else { custom_functions[custom_fn] = custom_fn_ext; }
+}
+
+//! Using the given information for a substrait function extension, registers all
+//! acceptable function signatures for the substrait function.
 void SubstraitCustomFunctions::InsertFunctionExtension( string         name_p
                                                        ,vector<string> types_p
                                                        ,string         file_path) {
@@ -115,7 +119,7 @@ void SubstraitCustomFunctions::InsertFunctionExtension( string         name_p
 		if (IsAnyParamType(param_type)) { fn_param_types.emplace_back(GetAllTypes()); }
 
     // Push the specified param type only (single-element vector)
-    else { fn_param_types.push_back({t}); }
+    else { fn_param_types.push_back({param_type}); }
 	}
 
 	// Get the number of dimensions
@@ -166,7 +170,7 @@ vector<string> SubstraitCustomFunctions::GetTypes(const vector<substrait::Type> 
 
 // FIXME: We might have to do DuckDB extensions at some point
 SubstraitFunctionExtensions SubstraitCustomFunctions::Get(const string &name,
-                                                          const vector<::substrait::Type> &types) const {
+                                                          const vector<substrait::Type> &types) const {
 	vector<string> transformed_types;
 	if (types.empty()) {
 		SubstraitCustomFunction custom_function {name, {}};

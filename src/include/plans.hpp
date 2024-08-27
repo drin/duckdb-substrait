@@ -69,7 +69,7 @@ namespace mohair {
     shared_ptr<substrait::Plan> substrait;
 
     //! A system-level query plan represented by a specific query engine
-    shared_ptr<LogicalOpType>   engine;
+    shared_ptr<LogicalOpType> engine;
 
 
     SystemPlan( shared_ptr<substrait::Plan> s_plan
