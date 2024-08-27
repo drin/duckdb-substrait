@@ -23,11 +23,11 @@
 #include <string>
 #include <unordered_map>
 
-#include "duckdb.hpp"
 #include "google/protobuf/util/json_util.h"
+#include "duckdb.hpp"
 
-#include "substrait/plan.pb.h"
-#include "substrait/algebra.pb.h"
+#include "mohair-substrait/substrait/plan.pb.h"
+#include "mohair-substrait/substrait/algebra.pb.h"
 
 
 // ------------------------------
@@ -37,11 +37,13 @@
 using std::string;
 using std::unordered_map;
 
-// protobuf types and functions from duckdb namespace
+// types and functions from duckdb namespace
 using duckdb::unique_ptr;
 using duckdb::shared_ptr;
-using duckdb::google::protobuf::util::Status;
-using duckdb::google::protobuf::util::JsonStringToMessage;
+
+// types and functions from protobuf
+using ProtoStatus = absl::Status;
+using google::protobuf::util::JsonStringToMessage;
 
 
 // ------------------------------
