@@ -403,7 +403,7 @@ void DuckDBToSubstrait::TransformComparisonExpression(Expression &dexpr, substra
 	}
 
 	auto scalar_fun = sexpr.mutable_scalar_function();
-	vector<::substrait::Type> args_types;
+	vector<substrait::Type> args_types;
 	args_types.emplace_back(DuckToSubstraitType(dcomp.left->return_type));
 	args_types.emplace_back(DuckToSubstraitType(dcomp.right->return_type));
 	scalar_fun->set_function_reference(RegisterFunction(fname, args_types));
@@ -453,7 +453,7 @@ void DuckDBToSubstrait::TransformConjunctionExpression(Expression &dexpr, substr
 	}
 
 	auto scalar_fun = sexpr.mutable_scalar_function();
-	vector<::substrait::Type> args_types;
+	vector<substrait::Type> args_types;
 	for (auto &child : dconj.children) {
 		auto s_arg = scalar_fun->add_arguments();
 		TransformExpr(*child, *s_arg->mutable_value(), col_offset);
@@ -468,7 +468,7 @@ void DuckDBToSubstrait::TransformNotNullExpression(Expression &dexpr, substrait:
                                                    uint64_t col_offset) {
 	auto &dop = dexpr.Cast<BoundOperatorExpression>();
 	auto scalar_fun = sexpr.mutable_scalar_function();
-	vector<::substrait::Type> args_types;
+	vector<substrait::Type> args_types;
 	args_types.emplace_back(DuckToSubstraitType(dop.children[0]->return_type));
 	scalar_fun->set_function_reference(RegisterFunction("is_not_null", args_types));
 	auto s_arg = scalar_fun->add_arguments();
@@ -530,7 +530,7 @@ void DuckDBToSubstrait::TransformIsNullExpression(Expression &dexpr, substrait::
 void DuckDBToSubstrait::TransformNotExpression(Expression &dexpr, substrait::Expression &sexpr, uint64_t col_offset) {
 	auto &dop = dexpr.Cast<BoundOperatorExpression>();
 	auto scalar_fun = sexpr.mutable_scalar_function();
-	vector<::substrait::Type> args_types;
+	vector<substrait::Type> args_types;
 	args_types.emplace_back(DuckToSubstraitType(dop.children[0]->return_type));
 	scalar_fun->set_function_reference(RegisterFunction("not", args_types));
 	auto s_arg = scalar_fun->add_arguments();
@@ -588,7 +588,7 @@ void DuckDBToSubstrait::TransformExpr(Expression &dexpr, substrait::Expression &
 	}
 }
 
-uint64_t DuckDBToSubstrait::RegisterFunction(const string &name, vector<::substrait::Type> &args_types) {
+uint64_t DuckDBToSubstrait::RegisterFunction(const string &name, vector<substrait::Type> &args_types) {
 	if (name.empty()) {
 		throw InternalException("Missing function name");
 	}
@@ -705,7 +705,7 @@ substrait::Expression *DuckDBToSubstrait::TransformConstantComparisonFilter(uint
 	s_arg = s_scalar->add_arguments();
 	TransformConstant(constant_filter.constant, *s_arg->mutable_value());
 	uint64_t function_id;
-	vector<::substrait::Type> args_types;
+	vector<substrait::Type> args_types;
 	args_types.emplace_back(DuckToSubstraitType(column_type));
 
 	args_types.emplace_back(DuckToSubstraitType(constant_filter.constant.type()));
@@ -771,7 +771,7 @@ substrait::Expression *DuckDBToSubstrait::TransformJoinCond(const JoinCondition 
 	default:
 		throw NotImplementedException("Unsupported join comparison: " + ExpressionTypeToOperator(dcond.comparison));
 	}
-	vector<::substrait::Type> args_types;
+	vector<substrait::Type> args_types;
 	auto scalar_fun = expr->mutable_scalar_function();
 	auto s_arg = scalar_fun->add_arguments();
 	TransformExpr(*dcond.left, *s_arg->mutable_value());
@@ -964,10 +964,10 @@ substrait::Rel *DuckDBToSubstrait::TransformComparisonJoin(LogicalOperator &dop)
 		sjoin->set_type(substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_RIGHT);
 		break;
 	case JoinType::SINGLE:
-		sjoin->set_type(substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_SINGLE);
+		sjoin->set_type(substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT_SINGLE);
 		break;
 	case JoinType::SEMI:
-		sjoin->set_type(substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_SEMI);
+		sjoin->set_type(substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT_SEMI);
 		break;
 	case JoinType::OUTER:
 		sjoin->set_type(substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_OUTER);
@@ -1024,7 +1024,7 @@ substrait::Rel *DuckDBToSubstrait::TransformAggregateGroup(LogicalOperator &dop)
 		auto &daexpr = dmeas->Cast<BoundAggregateExpression>();
 
 		*smeas->mutable_output_type() = DuckToSubstraitType(daexpr.return_type);
-		vector<::substrait::Type> args_types;
+		vector<substrait::Type> args_types;
 		for (auto &darg : daexpr.children) {
 			auto s_arg = smeas->add_arguments();
 			args_types.emplace_back(DuckToSubstraitType(darg->return_type));

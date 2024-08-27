@@ -12,7 +12,7 @@
 #pragma once
 
 #include <unordered_map>
-#include <substrait/type.pb.h>
+#include <mohair-substrait/substrait/type.pb.h>
 
 #include "duckdb/common/types/hash.hpp"
 
@@ -22,37 +22,8 @@
 
 namespace duckdb {
 
-  // >> Type forwards
-  struct SubstraitCustomFunction;
+  // >> Base classes to represent substrait functions and function extensions
 
-
-  // >> Hash functors
-  //! Hash functor for "*" (any arguments) substrait functions
-  struct HashSubstraitFunctionsName {
-    size_t operator()(SubstraitCustomFunction const& custom_function) const noexcept {
-      return Hash(custom_function.name.c_str());
-    }
-  };
-
-  //! Hash functor for "?" (repeatable argument) and regular substrait functions
-  struct HashSubstraitFunctions {
-    size_t operator()(SubstraitCustomFunction const& custom_function) const noexcept {
-      // Hash the function arguments
-      auto& fn_argtypes = custom_function.arg_types;
-
-      auto hashed_argtypes = Hash(fn_argtypes[0].c_str());
-      for (idx_t arg_ndx = 1; arg_ndx < fn_argtypes.size(); arg_ndx++) {
-        hashed_argtypes = CombineHash(hashed_argtypes, Hash(fn_argtypes[arg_ndx].c_str()));
-      }
-
-      // Combine hashes for the function name and its argument types
-      auto hashed_name = Hash(custom_function.name.c_str());
-      return CombineHash(hashed_name, hashed_argtypes);
-    }
-  };
-
-
-  // >> Classes
   //! Class to describe an individual substrait function
   struct SubstraitCustomFunction {
 
@@ -90,10 +61,40 @@ namespace duckdb {
     string                  extension_path;
   };
 
+
+  // >> Hash functors
+
+  //! Hash functor for "*" (any arguments) substrait functions
+  struct HashSubstraitFunctionsName {
+    size_t operator()(SubstraitCustomFunction const& custom_function) const noexcept {
+      return Hash(custom_function.name.c_str());
+    }
+  };
+
+  //! Hash functor for "?" (repeatable argument) and regular substrait functions
+  struct HashSubstraitFunctions {
+    size_t operator()(SubstraitCustomFunction const& custom_function) const noexcept {
+      // Hash the function arguments
+      auto& fn_argtypes = custom_function.arg_types;
+
+      auto hashed_argtypes = Hash(fn_argtypes[0].c_str());
+      for (idx_t arg_ndx = 1; arg_ndx < fn_argtypes.size(); arg_ndx++) {
+        hashed_argtypes = CombineHash(hashed_argtypes, Hash(fn_argtypes[arg_ndx].c_str()));
+      }
+
+      // Combine hashes for the function name and its argument types
+      auto hashed_name = Hash(custom_function.name.c_str());
+      return CombineHash(hashed_name, hashed_argtypes);
+    }
+  };
+
+
+  // >> Other Classes
+
   //! Class that acts as a registry for substrait functions and their extensions
   struct SubstraitCustomFunctions {
     // type aliases for convenience
-    using SubstraitTypeVec  = vector<::substrait::Type>;
+    using SubstraitTypeVec  = vector<substrait::Type>;
 
     using SubstraitFnMap    = std::unordered_map< SubstraitCustomFunction
                                                  ,SubstraitFunctionExtensions
@@ -120,11 +121,14 @@ namespace duckdb {
       SubstraitFnMap    many_arg_functions; // For "?"     functions
 
       // Private methods
-      void InsertCustomFunction(string name_p, vector<string> types_p, string file_path);
-      void InsertAllFunctions( const vector<vector<string>>& all_types
-                              ,vector<idx_t>&                indices
-                              ,int                           depth
-                              ,string&                       name_p
+      void InsertCustomFunction(string fn_name, string ext_fpath, vector<string> param_types);
+      void InsertFunctionExtension(string name_p, vector<string> types_p, string file_path);
+
+      // A recursive function that calls `InsertCustomFunction` when it bottoms out
+      void InsertAllFunctions( const vector<vector<string>>& fn_param_types
+                              ,vector<idx_t>&                ptype_indices
+                              ,int                           param_ndx
+                              ,string&                       name
                               ,string&                       file_path);
   };
 

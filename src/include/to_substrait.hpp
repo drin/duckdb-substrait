@@ -134,8 +134,8 @@ private:
 				auto scalar_fun = temp_expr->mutable_scalar_function();
 				LogicalType boolean_type(LogicalTypeId::BOOLEAN);
 
-				vector<::substrait::Type> args_types {DuckToSubstraitType(boolean_type),
-				                                      DuckToSubstraitType(boolean_type)};
+				vector<substrait::Type> args_types {DuckToSubstraitType(boolean_type),
+				                                    DuckToSubstraitType(boolean_type)};
 
 				scalar_fun->set_function_reference(RegisterFunction("and", args_types));
 				*scalar_fun->mutable_output_type() = DuckToSubstraitType(boolean_type);

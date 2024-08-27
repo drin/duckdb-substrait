@@ -73,7 +73,7 @@ SubstraitToDuckDB::SubstraitToDuckDB(Connection &con_p, const string &serialized
 			throw std::runtime_error("Was not possible to convert binary into Substrait plan");
 		}
 	} else {
-		google::protobuf::util::Status status = google::protobuf::util::JsonStringToMessage(serialized, &plan);
+		absl::Status status = google::protobuf::util::JsonStringToMessage(serialized, &plan);
 		if (!status.ok()) {
 			throw std::runtime_error("Was not possible to convert JSON into Substrait plan: " + status.ToString());
 		}
@@ -428,10 +428,10 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformJoinOp(const substrait::Rel &so
 	case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_RIGHT:
 		djointype = JoinType::RIGHT;
 		break;
-	case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_SINGLE:
+	case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT_SINGLE:
 		djointype = JoinType::SINGLE;
 		break;
-	case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_SEMI:
+	case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT_SEMI:
 		djointype = JoinType::SEMI;
 		break;
 	case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_OUTER:
