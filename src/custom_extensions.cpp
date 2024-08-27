@@ -154,6 +154,8 @@ bool SubstraitFunctionExtensions::IsNative() const {
 	return extension_path == "native";
 }
 
+SubstraitCustomFunctions::SubstraitCustomFunctions() { Initialize(); }
+
 vector<string> SubstraitCustomFunctions::GetTypes(const vector<substrait::Type> &types) {
 	vector<string> transformed_types;
 	for (auto &type : types) {

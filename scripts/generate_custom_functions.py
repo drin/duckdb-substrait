@@ -22,21 +22,15 @@ template_bootstrap_customfns = Template('''
 //! It depends on substrait/extensions yaml files
 namespace duckdb {
 
-  SubstraitCustomFunctions SubstraitCustomFunctions::InitializedForDuckDB() {
-    SubstraitCustomFunctions registry_custom_fns;
-
+  void SubstraitCustomFunctions::Initialize() {
 $function_body
-
-    return registry_custom_fns;
   }
 
 } // namespace duckdb
 ''')
 
 template_insert_fn_ext = Template(
-    '    registry_custom_fns.InsertFunctionExtension('
-    '"$fn_name", { $fn_sig }, "$ext_path"'
-    ');\n'
+    '    InsertFunctionExtension("$fn_name", { $fn_sig }, "$ext_path");\n'
 )
 
 
