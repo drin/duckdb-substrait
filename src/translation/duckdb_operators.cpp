@@ -73,15 +73,15 @@ namespace duckdb {
   }
 
 
-  static duckdb::JoinType 
+  static duckdb::JoinType
   TranslateJoinType(const substrait::JoinRel& sjoin) {
     switch (sjoin.type()) {
-      case substrait::JoinRel::JOIN_TYPE_INNER      : return duckdb::JoinType::INNER;
-      case substrait::JoinRel::JOIN_TYPE_LEFT       : return duckdb::JoinType::LEFT;
-      case substrait::JoinRel::JOIN_TYPE_RIGHT      : return duckdb::JoinType::RIGHT;
+      case substrait::JoinRel::JOIN_TYPE_INNER:       return duckdb::JoinType::INNER;
+      case substrait::JoinRel::JOIN_TYPE_LEFT:        return duckdb::JoinType::LEFT;
+      case substrait::JoinRel::JOIN_TYPE_RIGHT:       return duckdb::JoinType::RIGHT;
       case substrait::JoinRel::JOIN_TYPE_LEFT_SINGLE: return duckdb::JoinType::SINGLE;
-      case substrait::JoinRel::JOIN_TYPE_LEFT_SEMI  : return duckdb::JoinType::SEMI;
-      case substrait::JoinRel::JOIN_TYPE_OUTER      : return duckdb::JoinType::OUTER;
+      case substrait::JoinRel::JOIN_TYPE_LEFT_SEMI:   return duckdb::JoinType::SEMI;
+      case substrait::JoinRel::JOIN_TYPE_OUTER:       return duckdb::JoinType::OUTER;
 
       default:
         throw InternalException("Unsupported join type");
