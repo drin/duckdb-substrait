@@ -46,9 +46,10 @@ const std::unordered_map<std::string, std::string> DuckDBToSubstrait::function_n
 
 const case_insensitive_set_t DuckDBToSubstrait::valid_extract_subfields = {
     "year",    "month",       "day",          "decade", "century", "millenium",
-    "quarter", "microsecond", "milliseconds", "second", "minute",  "hour"};
+    "quarter", "microsecond", "milliseconds", "second", "minute",  "hour"
+};
 
-const SubstraitCustomFunctions DuckDBToSubstrait::custom_functions {};
+const SubstraitCustomFunctions DuckDBToSubstrait::custom_functions = SubstraitCustomFunctions::InitializedForDuckDB();
 
 std::string &DuckDBToSubstrait::RemapFunctionName(std::string &function_name) {
 	auto it = function_names_remap.find(function_name);
