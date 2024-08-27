@@ -2,7 +2,7 @@
 
 #include <string>
 #include <unordered_map>
-#include "substrait/plan.pb.h"
+#include "mohair-substrait/substrait/plan.pb.h"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/common/shared_ptr.hpp"
 

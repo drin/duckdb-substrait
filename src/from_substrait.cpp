@@ -21,7 +21,7 @@
 
 #include "duckdb/parser/expression/comparison_expression.hpp"
 
-#include "substrait/plan.pb.h"
+#include "mohair-substrait/substrait/plan.pb.h"
 #include "google/protobuf/util/json_util.h"
 #include "duckdb/main/client_data.hpp"
 
