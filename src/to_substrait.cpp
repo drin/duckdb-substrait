@@ -49,7 +49,7 @@ const case_insensitive_set_t DuckDBToSubstrait::valid_extract_subfields = {
     "quarter", "microsecond", "milliseconds", "second", "minute",  "hour"
 };
 
-const SubstraitCustomFunctions DuckDBToSubstrait::custom_functions = SubstraitCustomFunctions::InitializedForDuckDB();
+const SubstraitCustomFunctions DuckDBToSubstrait::custom_functions;
 
 std::string &DuckDBToSubstrait::RemapFunctionName(std::string &function_name) {
 	auto it = function_names_remap.find(function_name);
