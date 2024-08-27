@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "google/protobuf/util/json_util.h"
+
 #include "duckdb.hpp"
 
 #include "mohair-substrait/substrait/plan.pb.h"
