@@ -72,7 +72,7 @@ namespace mohair {
   unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg) {
     auto plan = duckdb::make_uniq<substrait::Plan>();
 
-    Status status = JsonStringToMessage(json_msg, plan.get());
+    ProtoStatus status = JsonStringToMessage(json_msg, plan.get());
     if (not status.ok()) {
       throw std::runtime_error("Error parsing JSON Substrait Plan: " + status.ToString());
     }

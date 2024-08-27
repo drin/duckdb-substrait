@@ -109,7 +109,7 @@ namespace duckdb {
     planner.CreatePlan(std::move(plan_wrapper));
     shared_ptr<LogicalOperator> logical_plan { std::move(planner.plan) };
 
-    return make_shared<DuckLogicalPlan>(sys_plan->substrait, logical_plan);
+    return make_shared_ptr<DuckLogicalPlan>(sys_plan->substrait, logical_plan);
   }
 
   shared_ptr<DuckPhysicalPlan>
@@ -132,7 +132,7 @@ namespace duckdb {
       physical_planner.CreatePlan(std::move(logical_plan))
     };
 
-    return make_shared<DuckPhysicalPlan>(engine_plan->substrait, physical_plan);
+    return make_shared_ptr<DuckPhysicalPlan>(engine_plan->substrait, physical_plan);
   }
 
   bool ShouldKeepExecuting(PendingExecutionResult& exec_result) {
