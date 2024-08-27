@@ -89,10 +89,6 @@ namespace duckdb {
   DuckDBTranslator::DuckDBTranslator(ClientContext &ctxt): context(ctxt) {
     t_conn        = make_uniq<Connection>(*ctxt.db);
     functions_map = make_uniq<mohair::SubstraitFunctionMap>();
-
-    // create an http state, but I don't know what this is for
-    auto http_state = HTTPState::TryGetState(*(t_conn->context));
-    http_state->Reset();
   }
 
   // >> Entry points for substrait plan (json or binary) -> duckdb logical plan
@@ -181,7 +177,7 @@ namespace duckdb {
 
     if (    exec_result == PendingExecutionResult::RESULT_READY
         and plan_executor.HasResultCollector()) {
-      return std::move(plan_executor.GetResult());
+      return plan_executor.GetResult();
     }
 
     return nullptr;
