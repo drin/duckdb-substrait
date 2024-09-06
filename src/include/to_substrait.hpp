@@ -1,17 +1,20 @@
 #pragma once
 
-#include "custom_extensions/custom_extensions.hpp"
+#include <string>
+#include <unordered_map>
+
 #include "duckdb/common/helper.hpp"
 #include "duckdb/function/table_function.hpp"
+
 #include "duckdb/planner/bound_result_modifier.hpp"
 #include "duckdb/planner/expression.hpp"
 #include "duckdb/planner/joinside.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/table_filter.hpp"
-#include "mohair-substrait/substrait/algebra.pb.h"
-#include "mohair-substrait/substrait/plan.pb.h"
-#include <string>
-#include <unordered_map>
+
+#include "mohair-substrait/mohair_substrait.hpp"
+
+#include "custom_extensions/custom_extensions.hpp"
 
 namespace duckdb {
 class DuckDBToSubstrait {

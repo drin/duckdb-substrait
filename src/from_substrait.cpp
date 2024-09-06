@@ -1,10 +1,14 @@
 #include "from_substrait.hpp"
 
 #include "duckdb/common/types/value.hpp"
-#include "duckdb/parser/expression/list.hpp"
+#include "duckdb/common/exception.hpp"
+#include "duckdb/common/helper.hpp"
+#include "duckdb/common/shared_ptr.hpp"
+#include "duckdb/common/types.hpp"
+#include "duckdb/common/enums/set_operation_type.hpp"
+
 #include "duckdb/main/relation/join_relation.hpp"
 #include "duckdb/main/relation/cross_product_relation.hpp"
-
 #include "duckdb/main/relation/limit_relation.hpp"
 #include "duckdb/main/relation/projection_relation.hpp"
 #include "duckdb/main/relation/setop_relation.hpp"
@@ -12,18 +16,12 @@
 #include "duckdb/main/relation/filter_relation.hpp"
 #include "duckdb/main/relation/order_relation.hpp"
 #include "duckdb/main/connection.hpp"
-#include "duckdb/parser/parser.hpp"
-#include "duckdb/common/exception.hpp"
-#include "duckdb/common/helper.hpp"
-#include "duckdb/common/shared_ptr.hpp"
-#include "duckdb/common/types.hpp"
-#include "duckdb/common/enums/set_operation_type.hpp"
+#include "duckdb/main/client_data.hpp"
 
+#include "duckdb/parser/parser.hpp"
+#include "duckdb/parser/expression/list.hpp"
 #include "duckdb/parser/expression/comparison_expression.hpp"
 
-#include "mohair-substrait/substrait/plan.pb.h"
-#include "google/protobuf/util/json_util.h"
-#include "duckdb/main/client_data.hpp"
 
 namespace duckdb {
 const std::unordered_map<std::string, std::string> SubstraitToDuckDB::function_names_remap = {
@@ -71,9 +69,9 @@ SubstraitToDuckDB::SubstraitToDuckDB(Connection &con_p, const string &serialized
       throw std::runtime_error("Was not possible to convert binary into Substrait plan");
     }
   } else {
-    absl::Status status = google::protobuf::util::JsonStringToMessage(serialized, &plan);
-    if (!status.ok()) {
-      throw std::runtime_error("Was not possible to convert JSON into Substrait plan: " + status.ToString());
+    if (!mohair::SerializeJson(serialized, &plan)) {
+      // TODO: decide if wrapper should return error message
+      throw std::runtime_error("Was not possible to convert JSON into Substrait plan");
     }
   }
 

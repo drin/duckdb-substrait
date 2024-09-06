@@ -66,7 +66,6 @@
 // ------------------------------
 // Convenience aliases
 
-using duckdb::unique_ptr;
 using std::string;
 
 using FunctionRenameMap = std::unordered_map<string, string>;
@@ -152,7 +151,7 @@ namespace duckdb {
                                                       ,bool                        optimize);
 
     private:
-      ClientContext&                           context;
+      ClientContext& context;
       unique_ptr<Connection>                   t_conn;
       unique_ptr<mohair::SubstraitFunctionMap> functions_map;
 

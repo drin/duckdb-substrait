@@ -30,7 +30,7 @@ endif()
 
 # TODO: move this to a package finder
 # library for mohair-substrait
-find_library(MohairSubstrait_LIBRARIES mohair-substrait REQUIRED)
+find_library(MohairSubstrait_LIBRARIES libmohair-substrait.a REQUIRED)
 if(MohairSubstrait_LIBRARIES-NOTFOUND)
   message(FATAL_ERROR "Could not find mohair-substrait")
 
@@ -83,6 +83,7 @@ set(EXTENSION_SOURCES
 
 # >> The library for the duckdb-substrait extension itself
 add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
+# set_target_properties(${EXTENSION_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 
 # ------------------------------
@@ -91,20 +92,20 @@ add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
 # >> duckdb-substrait extension
 
 # link the protobuf library (the framework itself)
-target_link_libraries(${EXTENSION_NAME} PRIVATE protobuf::libprotobuf)
+target_link_libraries(${EXTENSION_NAME} PUBLIC protobuf::libprotobuf)
 
 # conditionally, link against absl
 if (Protobuf_VERSION VERSION_GREATER_EQUAL 4)
   # this is needed for generated protobuf libs that use ABSL_DCHECK*()
   target_link_libraries(${EXTENSION_NAME}
-                        PRIVATE absl::log_internal_check_op
-                                absl::status)
+                        PUBLIC absl::status
+                               absl::log_internal_check_op)
 endif()
 
 # link against generated protobuf lib (mohair-substrait)
 if(MohairSubstrait_LIBRARIES)
-  message(STATUS "adding mohair-substrait library")
-  target_link_libraries(${EXTENSION_NAME} PRIVATE ${MohairSubstrait_LIBRARIES})
+  message(STATUS "linking mohair-substrait library: ${MohairSubstrait_LIBRARIES}")
+  target_link_libraries(${EXTENSION_NAME} PUBLIC ${MohairSubstrait_LIBRARIES})
 endif()
 
 
@@ -117,10 +118,10 @@ include_directories(src/include)
 # >> External headers specific to duckdb-substrait dependencies
 
 # protobuf
-target_include_directories(${EXTENSION_NAME} PRIVATE ${Protobuf_INCLUDE_DIRS})
+target_include_directories(${EXTENSION_NAME} PUBLIC ${Protobuf_INCLUDE_DIRS})
 
 # mohair-substrait
-target_include_directories(${EXTENSION_NAME} PRIVATE ${MohairSubstrait_INCLUDE_DIRS})
+target_include_directories(${EXTENSION_NAME} PUBLIC ${MohairSubstrait_INCLUDE_DIRS})
 
 
 # ------------------------------

@@ -59,7 +59,8 @@ namespace mohair {
   // Builder Functions for SystemPlan
 
   //! Builder function that constructs SystemPlan from a serialized substrait message
-  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitMessage(const string& serialized_msg) {
+  duckdb::unique_ptr<substrait::Plan>
+  SubstraitPlanFromSubstraitMessage(const string& serialized_msg) {
     auto plan = duckdb::make_uniq<substrait::Plan>();
     if (not plan->ParseFromString(serialized_msg)) {
       throw std::runtime_error("Error parsing serialized Substrait Plan");
@@ -69,15 +70,15 @@ namespace mohair {
   }
 
   //! Builder function that constructs SystemPlan from a JSON-formatted substrait message
-  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg) {
+  duckdb::unique_ptr<substrait::Plan>
+  SubstraitPlanFromSubstraitJson(const string& json_msg) {
     auto plan = duckdb::make_uniq<substrait::Plan>();
 
-    ProtoStatus status = JsonStringToMessage(json_msg, plan.get());
-    if (not status.ok()) {
-      throw std::runtime_error("Error parsing JSON Substrait Plan: " + status.ToString());
-    }
+    if (mohair::SerializeJson(json_msg, plan.get())) { return plan; }
 
-    return plan;
+    // TODO: decide if I should return an error message from wrapper
+    // throw std::runtime_error("Error parsing JSON Substrait Plan: " + status.ToString());
+    throw std::runtime_error("Error parsing JSON Substrait Plan");
   }
 
 } // namespace: mohair

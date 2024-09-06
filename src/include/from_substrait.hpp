@@ -2,9 +2,11 @@
 
 #include <string>
 #include <unordered_map>
-#include "mohair-substrait/substrait/plan.pb.h"
+
 #include "duckdb/main/connection.hpp"
 #include "duckdb/common/shared_ptr.hpp"
+
+#include "mohair-substrait/mohair_substrait.hpp"
 
 namespace duckdb {
 

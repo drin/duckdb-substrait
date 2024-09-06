@@ -4,20 +4,20 @@
 #include "duckdb/common/enums/expression_type.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/function/table/table_scan.hpp"
+
+#include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/planner/expression/list.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
 #include "duckdb/planner/joinside.hpp"
 #include "duckdb/planner/operator/list.hpp"
 #include "duckdb/planner/table_filter.hpp"
+#include "duckdb/planner/operator/logical_set_operation.hpp"
+
 #include "duckdb/storage/statistics/base_statistics.hpp"
 #include "duckdb/catalog/catalog_entry/duck_table_entry.hpp"
-#include "duckdb/planner/operator/logical_set_operation.hpp"
-#include "google/protobuf/util/json_util.h"
-#include "mohair-substrait/substrait/algebra.pb.h"
-#include "mohair-substrait/substrait/plan.pb.h"
-#include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/execution/index/art/art_key.hpp"
+
 
 namespace duckdb {
 const std::unordered_map<std::string, std::string> DuckDBToSubstrait::function_names_remap = {
@@ -69,11 +69,9 @@ string DuckDBToSubstrait::SerializeToString() const {
 
 string DuckDBToSubstrait::SerializeToJson() const {
 	string serialized;
-	auto success = google::protobuf::util::MessageToJsonString(plan, &serialized);
-	if (!success.ok()) {
-		throw InternalException("It was not possible to serialize the substrait plan");
-	}
-	return serialized;
+
+	if (mohair::JsonifyMessage(plan, &serialized)) { return serialized; }
+  throw InternalException("It was not possible to serialize the substrait plan");
 }
 
 void DuckDBToSubstrait::AllocateFunctionArgument(substrait::Expression_ScalarFunction *scalar_fun,

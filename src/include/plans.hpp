@@ -23,10 +23,9 @@
 #include <string>
 #include <unordered_map>
 
-#include "google/protobuf/util/json_util.h"
-
 #include "duckdb.hpp"
 
+#include "mohair-substrait/mohair_substrait.hpp"
 #include "mohair-substrait/substrait/plan.pb.h"
 #include "mohair-substrait/substrait/algebra.pb.h"
 
@@ -37,14 +36,6 @@
 // Standard types
 using std::string;
 using std::unordered_map;
-
-// types and functions from duckdb namespace
-using duckdb::unique_ptr;
-using duckdb::shared_ptr;
-
-// types and functions from protobuf
-using ProtoStatus = absl::Status;
-using google::protobuf::util::JsonStringToMessage;
 
 
 // ------------------------------
@@ -66,14 +57,14 @@ namespace mohair {
   template <typename LogicalOpType>
   struct SystemPlan {
     //! A system-level query plan represented as substrait
-    shared_ptr<substrait::Plan> substrait;
+    duckdb::shared_ptr<substrait::Plan> substrait;
 
     //! A system-level query plan represented by a specific query engine
-    shared_ptr<LogicalOpType> engine;
+    duckdb::shared_ptr<LogicalOpType> engine;
 
 
-    SystemPlan( shared_ptr<substrait::Plan> s_plan
-               ,shared_ptr<LogicalOpType>   e_plan)
+    SystemPlan( duckdb::shared_ptr<substrait::Plan> s_plan
+               ,duckdb::shared_ptr<LogicalOpType>   e_plan)
       :  substrait(s_plan), engine(e_plan) {}
 
 
@@ -82,10 +73,12 @@ namespace mohair {
   };
 
   //! Builder function that constructs SystemPlan from a serialized substrait message
-  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitMessage(const string& serialized_msg);
+  duckdb::unique_ptr<substrait::Plan>
+  SubstraitPlanFromSubstraitMessage(const string& serialized_msg);
 
   //! Builder function that constructs SystemPlan from a JSON-formatted substrait message
-  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg);
+  duckdb::unique_ptr<substrait::Plan>
+  SubstraitPlanFromSubstraitJson(const string& json_msg);
 
 } // namespace: mohair
 
