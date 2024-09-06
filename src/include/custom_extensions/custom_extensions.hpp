@@ -12,7 +12,7 @@
 #pragma once
 
 #include <unordered_map>
-#include <mohair-substrait/substrait/type.pb.h>
+#include "substrait/type.pb.h"
 
 #include "duckdb/common/types/hash.hpp"
 
