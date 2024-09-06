@@ -27,8 +27,8 @@
 
 #include "duckdb.hpp"
 
-#include "mohair-substrait/substrait/plan.pb.h"
-#include "mohair-substrait/substrait/algebra.pb.h"
+#include "substrait/plan.pb.h"
+#include "substrait/algebra.pb.h"
 
 
 // ------------------------------
