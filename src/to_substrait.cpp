@@ -14,8 +14,8 @@
 #include "duckdb/catalog/catalog_entry/duck_table_entry.hpp"
 #include "duckdb/planner/operator/logical_set_operation.hpp"
 #include "google/protobuf/util/json_util.h"
-#include "mohair-substrait/substrait/algebra.pb.h"
-#include "mohair-substrait/substrait/plan.pb.h"
+#include "substrait/algebra.pb.h"
+#include "substrait/plan.pb.h"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/execution/index/art/art_key.hpp"
 

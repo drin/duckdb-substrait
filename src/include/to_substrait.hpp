@@ -16,8 +16,8 @@
 #include "duckdb/planner/joinside.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/table_filter.hpp"
-#include "mohair-substrait/substrait/algebra.pb.h"
-#include "mohair-substrait/substrait/plan.pb.h"
+#include "substrait/algebra.pb.h"
+#include "substrait/plan.pb.h"
 #include <string>
 #include <unordered_map>
 
