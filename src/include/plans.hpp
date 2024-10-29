@@ -27,12 +27,14 @@
 
 #include "duckdb.hpp"
 
-#include "substrait/plan.pb.h"
-#include "substrait/algebra.pb.h"
+#include "skytether/substrait/plan.pb.h"
+#include "skytether/substrait/algebra.pb.h"
 
 
 // ------------------------------
 // Macros and Type Aliases
+
+namespace skysubstrait = skytether::substrait;
 
 // Standard types
 using std::string;
@@ -54,10 +56,10 @@ namespace mohair {
 
   //! Alias template for transpilation functions
   template <typename LogicalOpType>
-  using TranspileSysPlanFnType = std::function<substrait::Plan(LogicalOpType&)>;
+  using TranspileSysPlanFnType = std::function<skysubstrait::Plan(LogicalOpType&)>;
 
   template <typename LogicalOpType>
-  using TranspileSubPlanFnType = std::function<LogicalOpType(substrait::Plan&)>;
+  using TranspileSubPlanFnType = std::function<LogicalOpType(skysubstrait::Plan&)>;
 
   //! Templated class to hold a substrait plan and a "system plan".
   /** The system plan is flexibly represented by the templated type so that any particular
@@ -66,14 +68,14 @@ namespace mohair {
   template <typename LogicalOpType>
   struct SystemPlan {
     //! A system-level query plan represented as substrait
-    shared_ptr<substrait::Plan> substrait;
+    shared_ptr<skysubstrait::Plan> substrait;
 
     //! A system-level query plan represented by a specific query engine
     shared_ptr<LogicalOpType> engine;
 
 
-    SystemPlan( shared_ptr<substrait::Plan> s_plan
-               ,shared_ptr<LogicalOpType>   e_plan)
+    SystemPlan( shared_ptr<skysubstrait::Plan> s_plan
+               ,shared_ptr<LogicalOpType>      e_plan)
       :  substrait(s_plan), engine(e_plan) {}
 
 
@@ -82,10 +84,10 @@ namespace mohair {
   };
 
   //! Builder function that constructs SystemPlan from a serialized substrait message
-  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitMessage(const string& serialized_msg);
+  unique_ptr<skysubstrait::Plan> SubstraitPlanFromSubstraitMessage(const string& serialized_msg);
 
   //! Builder function that constructs SystemPlan from a JSON-formatted substrait message
-  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg);
+  unique_ptr<skysubstrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg);
 
 } // namespace: mohair
 
@@ -97,7 +99,7 @@ namespace mohair {
     //! Registry of substrait function extensions used in substrait plan
     unordered_map<uint64_t, string> fn_map;
 
-    void   RegisterExtensionFunctions(substrait::Plan& plan);
+    void   RegisterExtensionFunctions(skysubstrait::Plan& plan);
     string FindExtensionFunction(uint64_t id);
   };
 

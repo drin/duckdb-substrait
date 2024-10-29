@@ -12,13 +12,19 @@
 #pragma once
 
 #include <unordered_map>
-#include "substrait/type.pb.h"
+#include "skytether/substrait/type.pb.h"
 
 #include "duckdb/common/types/hash.hpp"
 
 
 // ------------------------------
-// Dependencies
+// Aliases
+
+namespace skysubstrait = skytether::substrait;
+
+
+// ------------------------------
+// Functions and Classes
 
 namespace duckdb {
 
@@ -94,7 +100,7 @@ namespace duckdb {
   //! Class that acts as a registry for substrait functions and their extensions
   struct SubstraitCustomFunctions {
     // type aliases for convenience
-    using SubstraitTypeVec  = vector<substrait::Type>;
+    using SubstraitTypeVec  = vector<skysubstrait::Type>;
 
     using SubstraitFnMap    = std::unordered_map< SubstraitCustomFunction
                                                  ,SubstraitFunctionExtensions
@@ -112,7 +118,7 @@ namespace duckdb {
     SubstraitFunctionExtensions Get(const string& name, const SubstraitTypeVec& types) const;
 
     // Static methods
-	  static vector<string> GetTypes(const vector<substrait::Type>& types);
+	  static vector<string> GetTypes(const vector<skysubstrait::Type>& types);
 
     private:
       // Private attributes
