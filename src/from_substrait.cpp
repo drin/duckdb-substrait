@@ -23,9 +23,11 @@
 
 #include "duckdb/main/client_data.hpp"
 #include "google/protobuf/util/json_util.h"
-#include "substrait/plan.pb.h"
+#include "skytether/substrait/plan.pb.h"
 
 #include "duckdb/main/relation/table_relation.hpp"
+
+namespace skysubstrait = skytether::substrait;
 
 namespace duckdb {
 const std::unordered_map<std::string, std::string> SubstraitToDuckDB::function_names_remap = {
@@ -87,18 +89,18 @@ SubstraitToDuckDB::SubstraitToDuckDB(Connection &con_p, const string &serialized
   }
 }
 
-Value TransformLiteralToValue(const substrait::Expression_Literal &literal) {
+Value TransformLiteralToValue(const skysubstrait::Expression_Literal &literal) {
   if (literal.has_null()) {
     return Value(LogicalType::SQLNULL);
   }
   switch (literal.literal_type_case()) {
-  case substrait::Expression_Literal::LiteralTypeCase::kFp64:
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kFp64:
     return Value::DOUBLE(literal.fp64());
-  case substrait::Expression_Literal::LiteralTypeCase::kFp32:
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kFp32:
     return Value::FLOAT(literal.fp32());
-  case substrait::Expression_Literal::LiteralTypeCase::kString:
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kString:
     return {literal.string()};
-  case substrait::Expression_Literal::LiteralTypeCase::kDecimal: {
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kDecimal: {
     const auto &substrait_decimal = literal.decimal();
     auto raw_value = reinterpret_cast<const uint64_t *>(substrait_decimal.value().c_str());
     hugeint_t substrait_value {};
@@ -122,31 +124,31 @@ Value TransformLiteralToValue(const substrait::Expression_Literal &literal) {
       throw InternalException("Not accepted internal type for decimal");
     }
   }
-  case substrait::Expression_Literal::LiteralTypeCase::kBoolean: {
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kBoolean: {
     return Value(literal.boolean());
   }
-  case substrait::Expression_Literal::LiteralTypeCase::kI8:
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kI8:
     return Value::TINYINT(static_cast<int8_t>(literal.i8()));
-  case substrait::Expression_Literal::LiteralTypeCase::kI32:
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kI32:
     return Value::INTEGER(literal.i32());
-  case substrait::Expression_Literal::LiteralTypeCase::kI64:
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kI64:
     return Value::BIGINT(literal.i64());
-  case substrait::Expression_Literal::LiteralTypeCase::kDate: {
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kDate: {
     date_t date(literal.date());
     return Value::DATE(date);
   }
-  case substrait::Expression_Literal::LiteralTypeCase::kTime: {
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kTime: {
     dtime_t time(literal.time());
     return Value::TIME(time);
   }
-  case substrait::Expression_Literal::LiteralTypeCase::kIntervalYearToMonth: {
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kIntervalYearToMonth: {
     interval_t interval {};
     interval.months = literal.interval_year_to_month().months();
     interval.days = 0;
     interval.micros = 0;
     return Value::INTERVAL(interval);
   }
-  case substrait::Expression_Literal::LiteralTypeCase::kIntervalDayToSecond: {
+  case skysubstrait::Expression_Literal::LiteralTypeCase::kIntervalDayToSecond: {
     interval_t interval {};
     interval.months = 0;
     interval.days = literal.interval_day_to_second().days();
@@ -158,11 +160,11 @@ Value TransformLiteralToValue(const substrait::Expression_Literal &literal) {
   }
 }
 
-unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformLiteralExpr(const substrait::Expression &sexpr) {
+unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformLiteralExpr(const skysubstrait::Expression &sexpr) {
   return make_uniq<ConstantExpression>(TransformLiteralToValue(sexpr.literal()));
 }
 
-unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformSelectionExpr(const substrait::Expression &sexpr) {
+unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformSelectionExpr(const skysubstrait::Expression &sexpr) {
   if (!sexpr.selection().has_direct_reference() || !sexpr.selection().direct_reference().has_struct_field()) {
     throw InternalException("Can only have direct struct references in selections");
   }
@@ -173,7 +175,7 @@ void SubstraitToDuckDB::VerifyCorrectExtractSubfield(const string &subfield) {
   D_ASSERT(SubstraitToDuckDB::valid_extract_subfields.count(subfield));
 }
 
-unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformScalarFunctionExpr(const substrait::Expression &sexpr) {
+unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformScalarFunctionExpr(const skysubstrait::Expression &sexpr) {
   auto function_name = FindFunction(sexpr.scalar_function().function_reference());
   function_name = RemoveExtension(function_name);
   vector<unique_ptr<ParsedExpression>> children;
@@ -267,7 +269,7 @@ unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformScalarFunctionExpr(cons
   return make_uniq<FunctionExpression>(RemapFunctionName(function_name), std::move(children));
 }
 
-unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformIfThenExpr(const substrait::Expression &sexpr) {
+unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformIfThenExpr(const skysubstrait::Expression &sexpr) {
   const auto &scase = sexpr.if_then();
   auto dcase = make_uniq<CaseExpression>();
   for (const auto &sif : scase.ifs()) {
@@ -280,40 +282,40 @@ unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformIfThenExpr(const substr
   return std::move(dcase);
 }
 
-LogicalType SubstraitToDuckDB::SubstraitToDuckType(const substrait::Type &s_type) {
+LogicalType SubstraitToDuckDB::SubstraitToDuckType(const skysubstrait::Type &s_type) {
   switch (s_type.kind_case()) {
-  case substrait::Type::KindCase::kBool:
+  case skysubstrait::Type::KindCase::kBool:
     return {LogicalTypeId::BOOLEAN};
-  case substrait::Type::KindCase::kI16:
+  case skysubstrait::Type::KindCase::kI16:
     return {LogicalTypeId::SMALLINT};
-  case substrait::Type::KindCase::kI32:
+  case skysubstrait::Type::KindCase::kI32:
     return {LogicalTypeId::INTEGER};
-  case substrait::Type::KindCase::kI64:
+  case skysubstrait::Type::KindCase::kI64:
     return {LogicalTypeId::BIGINT};
-  case substrait::Type::KindCase::kDecimal: {
+  case skysubstrait::Type::KindCase::kDecimal: {
     auto &s_decimal_type = s_type.decimal();
     return LogicalType::DECIMAL(s_decimal_type.precision(), s_decimal_type.scale());
   }
-  case substrait::Type::KindCase::kDate:
+  case skysubstrait::Type::KindCase::kDate:
     return {LogicalTypeId::DATE};
-  case substrait::Type::KindCase::kVarchar:
-  case substrait::Type::KindCase::kString:
+  case skysubstrait::Type::KindCase::kVarchar:
+  case skysubstrait::Type::KindCase::kString:
     return {LogicalTypeId::VARCHAR};
-  case substrait::Type::KindCase::kFp64:
+  case skysubstrait::Type::KindCase::kFp64:
     return {LogicalTypeId::DOUBLE};
   default:
     throw NotImplementedException("Substrait type not yet supported");
   }
 }
 
-unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformCastExpr(const substrait::Expression &sexpr) {
+unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformCastExpr(const skysubstrait::Expression &sexpr) {
   const auto &scast = sexpr.cast();
   auto cast_type = SubstraitToDuckType(scast.type());
   auto cast_child = TransformExpr(scast.input());
   return make_uniq<CastExpression>(cast_type, std::move(cast_child));
 }
 
-unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformInExpr(const substrait::Expression &sexpr) {
+unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformInExpr(const skysubstrait::Expression &sexpr) {
   const auto &substrait_in = sexpr.singular_or_list();
 
   vector<unique_ptr<ParsedExpression>> values;
@@ -326,7 +328,7 @@ unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformInExpr(const substrait:
   return make_uniq<OperatorExpression>(ExpressionType::COMPARE_IN, std::move(values));
 }
 
-unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformNested(const substrait::Expression &sexpr) {
+unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformNested(const skysubstrait::Expression &sexpr) {
   auto &nested_expression = sexpr.nested();
   if (nested_expression.has_struct_()) {
     auto &struct_expression = nested_expression.struct_();
@@ -357,23 +359,23 @@ unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformNested(const substrait:
 
 }
 
-unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformExpr(const substrait::Expression &sexpr) {
+unique_ptr<ParsedExpression> SubstraitToDuckDB::TransformExpr(const skysubstrait::Expression &sexpr) {
   switch (sexpr.rex_type_case()) {
-  case substrait::Expression::RexTypeCase::kLiteral:
+  case skysubstrait::Expression::RexTypeCase::kLiteral:
     return TransformLiteralExpr(sexpr);
-  case substrait::Expression::RexTypeCase::kSelection:
+  case skysubstrait::Expression::RexTypeCase::kSelection:
     return TransformSelectionExpr(sexpr);
-  case substrait::Expression::RexTypeCase::kScalarFunction:
+  case skysubstrait::Expression::RexTypeCase::kScalarFunction:
     return TransformScalarFunctionExpr(sexpr);
-  case substrait::Expression::RexTypeCase::kIfThen:
+  case skysubstrait::Expression::RexTypeCase::kIfThen:
     return TransformIfThenExpr(sexpr);
-  case substrait::Expression::RexTypeCase::kCast:
+  case skysubstrait::Expression::RexTypeCase::kCast:
     return TransformCastExpr(sexpr);
-  case substrait::Expression::RexTypeCase::kSingularOrList:
+  case skysubstrait::Expression::RexTypeCase::kSingularOrList:
     return TransformInExpr(sexpr);
-  case substrait::Expression::RexTypeCase::kNested:
+  case skysubstrait::Expression::RexTypeCase::kNested:
     return TransformNested(sexpr);
-  case substrait::Expression::RexTypeCase::kSubquery:
+  case skysubstrait::Expression::RexTypeCase::kSubquery:
   default:
     throw InternalException("Unsupported expression type " + to_string(sexpr.rex_type_case()));
   }
@@ -386,25 +388,25 @@ string SubstraitToDuckDB::FindFunction(uint64_t id) {
   return functions_map[id];
 }
 
-OrderByNode SubstraitToDuckDB::TransformOrder(const substrait::SortField &sordf) {
+OrderByNode SubstraitToDuckDB::TransformOrder(const skysubstrait::SortField &sordf) {
 
   OrderType dordertype;
   OrderByNullType dnullorder;
 
   switch (sordf.direction()) {
-  case substrait::SortField_SortDirection::SortField_SortDirection_SORT_DIRECTION_ASC_NULLS_FIRST:
+  case skysubstrait::SortField_SortDirection::SortField_SortDirection_SORT_DIRECTION_ASC_NULLS_FIRST:
     dordertype = OrderType::ASCENDING;
     dnullorder = OrderByNullType::NULLS_FIRST;
     break;
-  case substrait::SortField_SortDirection::SortField_SortDirection_SORT_DIRECTION_ASC_NULLS_LAST:
+  case skysubstrait::SortField_SortDirection::SortField_SortDirection_SORT_DIRECTION_ASC_NULLS_LAST:
     dordertype = OrderType::ASCENDING;
     dnullorder = OrderByNullType::NULLS_LAST;
     break;
-  case substrait::SortField_SortDirection::SortField_SortDirection_SORT_DIRECTION_DESC_NULLS_FIRST:
+  case skysubstrait::SortField_SortDirection::SortField_SortDirection_SORT_DIRECTION_DESC_NULLS_FIRST:
     dordertype = OrderType::DESCENDING;
     dnullorder = OrderByNullType::NULLS_FIRST;
     break;
-  case substrait::SortField_SortDirection::SortField_SortDirection_SORT_DIRECTION_DESC_NULLS_LAST:
+  case skysubstrait::SortField_SortDirection::SortField_SortDirection_SORT_DIRECTION_DESC_NULLS_LAST:
     dordertype = OrderType::DESCENDING;
     dnullorder = OrderByNullType::NULLS_LAST;
     break;
@@ -415,27 +417,27 @@ OrderByNode SubstraitToDuckDB::TransformOrder(const substrait::SortField &sordf)
   return {dordertype, dnullorder, TransformExpr(sordf.expr())};
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformJoinOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformJoinOp(const skysubstrait::Rel &sop) {
   auto &sjoin = sop.join();
 
   JoinType djointype;
   switch (sjoin.type()) {
-  case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_INNER:
+  case skysubstrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_INNER:
     djointype = JoinType::INNER;
     break;
-  case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT:
+  case skysubstrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT:
     djointype = JoinType::LEFT;
     break;
-  case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_RIGHT:
+  case skysubstrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_RIGHT:
     djointype = JoinType::RIGHT;
     break;
-  case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT_SINGLE:
+  case skysubstrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT_SINGLE:
     djointype = JoinType::SINGLE;
     break;
-  case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT_SEMI:
+  case skysubstrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_LEFT_SEMI:
     djointype = JoinType::SEMI;
     break;
-  case substrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_OUTER:
+  case skysubstrait::JoinRel::JoinType::JoinRel_JoinType_JOIN_TYPE_OUTER:
     djointype = JoinType::OUTER;
     break;
   default:
@@ -447,26 +449,26 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformJoinOp(const substrait::Rel &so
                                        djointype);
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformCrossProductOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformCrossProductOp(const skysubstrait::Rel &sop) {
   auto &sub_cross = sop.cross();
 
   return make_shared_ptr<CrossProductRelation>(TransformOp(sub_cross.left())->Alias("left"),
                                                TransformOp(sub_cross.right())->Alias("right"));
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformFetchOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformFetchOp(const skysubstrait::Rel &sop) {
   auto &slimit = sop.fetch();
   idx_t limit = slimit.count() == -1 ? NumericLimits<idx_t>::Maximum() : slimit.count();
   idx_t offset = slimit.offset();
   return make_shared_ptr<LimitRelation>(TransformOp(slimit.input()), limit, offset);
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformFilterOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformFilterOp(const skysubstrait::Rel &sop) {
   auto &sfilter = sop.filter();
   return make_shared_ptr<FilterRelation>(TransformOp(sfilter.input()), TransformExpr(sfilter.condition()));
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformProjectOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformProjectOp(const skysubstrait::Rel &sop) {
   vector<unique_ptr<ParsedExpression>> expressions;
   for (auto &sexpr : sop.project().expressions()) {
     expressions.push_back(TransformExpr(sexpr));
@@ -480,7 +482,7 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformProjectOp(const substrait::Rel 
                                              std::move(mock_aliases));
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformAggregateOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformAggregateOp(const skysubstrait::Rel &sop) {
   vector<unique_ptr<ParsedExpression>> groups, expressions;
 
   if (sop.aggregate().groupings_size() > 0) {
@@ -496,7 +498,7 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformAggregateOp(const substrait::Re
     vector<unique_ptr<ParsedExpression>> children;
     auto &s_aggr_function = smeas.measure();
     bool is_distinct = s_aggr_function.invocation() ==
-                       substrait::AggregateFunction_AggregationInvocation_AGGREGATION_INVOCATION_DISTINCT;
+                       skysubstrait::AggregateFunction_AggregationInvocation_AGGREGATION_INVOCATION_DISTINCT;
     for (auto &sarg : s_aggr_function.arguments()) {
       children.push_back(TransformExpr(sarg.value()));
     }
@@ -512,7 +514,7 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformAggregateOp(const substrait::Re
                                             std::move(groups));
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformReadOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformReadOp(const skysubstrait::Rel &sop) {
   auto &sget = sop.read();
   shared_ptr<Relation> scan;
   if (sget.has_named_table()) {
@@ -579,7 +581,7 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformReadOp(const substrait::Rel &so
   return scan;
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformSortOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformSortOp(const skysubstrait::Rel &sop) {
   vector<OrderByNode> order_nodes;
   for (auto &sordf : sop.sort().sorts()) {
     order_nodes.push_back(TransformOrder(sordf));
@@ -587,15 +589,15 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformSortOp(const substrait::Rel &so
   return make_shared_ptr<OrderRelation>(TransformOp(sop.sort().input()), std::move(order_nodes));
 }
 
-static SetOperationType TransformSetOperationType(substrait::SetRel_SetOp setop) {
+static SetOperationType TransformSetOperationType(skysubstrait::SetRel_SetOp setop) {
   switch (setop) {
-  case substrait::SetRel_SetOp::SetRel_SetOp_SET_OP_UNION_ALL: {
+  case skysubstrait::SetRel_SetOp::SetRel_SetOp_SET_OP_UNION_ALL: {
     return SetOperationType::UNION;
   }
-  case substrait::SetRel_SetOp::SetRel_SetOp_SET_OP_MINUS_PRIMARY: {
+  case skysubstrait::SetRel_SetOp::SetRel_SetOp_SET_OP_MINUS_PRIMARY: {
     return SetOperationType::EXCEPT;
   }
-  case substrait::SetRel_SetOp::SetRel_SetOp_SET_OP_INTERSECTION_PRIMARY: {
+  case skysubstrait::SetRel_SetOp::SetRel_SetOp_SET_OP_INTERSECTION_PRIMARY: {
     return SetOperationType::INTERSECT;
   }
   default: {
@@ -604,7 +606,7 @@ static SetOperationType TransformSetOperationType(substrait::SetRel_SetOp setop)
   }
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformSetOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformSetOp(const skysubstrait::Rel &sop) {
   D_ASSERT(sop.has_set());
   auto &set = sop.set();
   auto set_op_type = set.op();
@@ -621,25 +623,25 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformSetOp(const substrait::Rel &sop
   return make_shared_ptr<SetOpRelation>(std::move(lhs), std::move(rhs), type);
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformOp(const substrait::Rel &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformOp(const skysubstrait::Rel &sop) {
   switch (sop.rel_type_case()) {
-  case substrait::Rel::RelTypeCase::kJoin:
+  case skysubstrait::Rel::RelTypeCase::kJoin:
     return TransformJoinOp(sop);
-  case substrait::Rel::RelTypeCase::kCross:
+  case skysubstrait::Rel::RelTypeCase::kCross:
     return TransformCrossProductOp(sop);
-  case substrait::Rel::RelTypeCase::kFetch:
+  case skysubstrait::Rel::RelTypeCase::kFetch:
     return TransformFetchOp(sop);
-  case substrait::Rel::RelTypeCase::kFilter:
+  case skysubstrait::Rel::RelTypeCase::kFilter:
     return TransformFilterOp(sop);
-  case substrait::Rel::RelTypeCase::kProject:
+  case skysubstrait::Rel::RelTypeCase::kProject:
     return TransformProjectOp(sop);
-  case substrait::Rel::RelTypeCase::kAggregate:
+  case skysubstrait::Rel::RelTypeCase::kAggregate:
     return TransformAggregateOp(sop);
-  case substrait::Rel::RelTypeCase::kRead:
+  case skysubstrait::Rel::RelTypeCase::kRead:
     return TransformReadOp(sop);
-  case substrait::Rel::RelTypeCase::kSort:
+  case skysubstrait::Rel::RelTypeCase::kSort:
     return TransformSortOp(sop);
-  case substrait::Rel::RelTypeCase::kSet:
+  case skysubstrait::Rel::RelTypeCase::kSet:
     return TransformSetOp(sop);
   default:
     throw InternalException("Unsupported relation type " + to_string(sop.rel_type_case()));
@@ -677,7 +679,7 @@ Relation *GetProjection(Relation &relation) {
   }
 }
 
-shared_ptr<Relation> SubstraitToDuckDB::TransformRootOp(const substrait::RelRoot &sop) {
+shared_ptr<Relation> SubstraitToDuckDB::TransformRootOp(const skysubstrait::RelRoot &sop) {
   vector<string> aliases;
   const auto &column_names = sop.names();
   vector<unique_ptr<ParsedExpression>> expressions;

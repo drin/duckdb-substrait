@@ -23,11 +23,17 @@
 
 
 // ------------------------------
+// Aliases
+
+namespace skysubstrait = skytether::substrait;
+
+
+// ------------------------------
 // Functions
 
 namespace duckdb {
 
-  LogicalType SubstraitToDuckType(const substrait::Type& s_type) {
+  LogicalType SubstraitToDuckType(const skysubstrait::Type& s_type) {
     if      (s_type.has_bool_()) { return LogicalType(LogicalTypeId::BOOLEAN ); }
     else if (s_type.has_i16()  ) { return LogicalType(LogicalTypeId::SMALLINT); }
     else if (s_type.has_i32()  ) { return LogicalType(LogicalTypeId::INTEGER ); }
@@ -49,10 +55,10 @@ namespace duckdb {
     }
   }
 
-  using SLiteralType = substrait::Expression::Literal::LiteralTypeCase;
+  using SLiteralType = skysubstrait::Expression::Literal::LiteralTypeCase;
 
   unique_ptr<ParsedExpression>
-  DuckDBTranslator::TranslateLiteralExpr(const substrait::Expression::Literal& slit) {
+  DuckDBTranslator::TranslateLiteralExpr(const skysubstrait::Expression::Literal& slit) {
     Value dval;
 
     if (slit.has_null()) {
@@ -186,7 +192,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBTranslator::TranslateSelectionExpr(const substrait::Expression &sexpr) {
+  DuckDBTranslator::TranslateSelectionExpr(const skysubstrait::Expression &sexpr) {
     if (   !sexpr.selection().has_direct_reference()
         || !sexpr.selection().direct_reference().has_struct_field()) {
       throw InternalException("Can only have direct struct references in selections");
@@ -198,7 +204,7 @@ namespace duckdb {
   }
 
   unique_ptr<ParsedExpression>
-  DuckDBTranslator::TranslateScalarFunctionExpr(const substrait::Expression& sexpr) {
+  DuckDBTranslator::TranslateScalarFunctionExpr(const skysubstrait::Expression& sexpr) {
     auto function_id   = sexpr.scalar_function().function_reference();
     auto function_name = functions_map->FindExtensionFunction(function_id);
     function_name      = RemoveExtension(function_name);
@@ -355,7 +361,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBTranslator::TranslateIfThenExpr(const substrait::Expression &sexpr) {
+  DuckDBTranslator::TranslateIfThenExpr(const skysubstrait::Expression &sexpr) {
     const auto& scase = sexpr.if_then();
     auto        dcase = make_uniq<CaseExpression>();
 
@@ -372,7 +378,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBTranslator::TranslateCastExpr(const substrait::Expression &sexpr) {
+  DuckDBTranslator::TranslateCastExpr(const skysubstrait::Expression &sexpr) {
     const auto& scast      = sexpr.cast();
     auto        cast_type  = SubstraitToDuckType(scast.type());
     auto        cast_child = TranslateExpr(scast.input());
@@ -382,7 +388,7 @@ namespace duckdb {
 
 
   unique_ptr<ParsedExpression>
-  DuckDBTranslator::TranslateInExpr(const substrait::Expression& sexpr) {
+  DuckDBTranslator::TranslateInExpr(const skysubstrait::Expression& sexpr) {
     const auto &substrait_in = sexpr.singular_or_list();
 
     vector<unique_ptr<ParsedExpression>> values;
@@ -399,10 +405,10 @@ namespace duckdb {
 
 
   // >> Top-level translation function
-  using SExprType = substrait::Expression::RexTypeCase;
+  using SExprType = skysubstrait::Expression::RexTypeCase;
 
   unique_ptr<ParsedExpression>
-  DuckDBTranslator::TranslateExpr(const substrait::Expression& sexpr) {
+  DuckDBTranslator::TranslateExpr(const skysubstrait::Expression& sexpr) {
     switch (sexpr.rex_type_case()) {
       case SExprType::kLiteral:        return TranslateLiteralExpr       (sexpr.literal());
       case SExprType::kSelection:      return TranslateSelectionExpr     (sexpr);

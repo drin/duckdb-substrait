@@ -25,8 +25,10 @@
 // ------------------------------
 // Macros and Type Aliases
 
-using NamedTable = substrait::ReadRel::NamedTable;
-using LocalFiles = substrait::ReadRel::LocalFiles;
+namespace skysubstrait = skytether::substrait;
+
+using NamedTable = skysubstrait::ReadRel::NamedTable;
+using LocalFiles = skysubstrait::ReadRel::LocalFiles;
 
 
 // ------------------------------
@@ -49,17 +51,17 @@ namespace duckdb {
   }
 
   static duckdb::SetOperationType
-  TranslateSetOperationType(substrait::SetRel::SetOp setop) {
+  TranslateSetOperationType(skysubstrait::SetRel::SetOp setop) {
     switch (setop) {
-      case substrait::SetRel::SET_OP_UNION_ALL: {
+      case skysubstrait::SetRel::SET_OP_UNION_ALL: {
         return duckdb::SetOperationType::UNION;
       }
 
-      case substrait::SetRel::SET_OP_MINUS_PRIMARY: {
+      case skysubstrait::SetRel::SET_OP_MINUS_PRIMARY: {
         return duckdb::SetOperationType::EXCEPT;
       }
 
-      case substrait::SetRel::SET_OP_INTERSECTION_PRIMARY: {
+      case skysubstrait::SetRel::SET_OP_INTERSECTION_PRIMARY: {
         return duckdb::SetOperationType::INTERSECT;
       }
 
@@ -74,14 +76,14 @@ namespace duckdb {
 
 
   static duckdb::JoinType
-  TranslateJoinType(const substrait::JoinRel& sjoin) {
+  TranslateJoinType(const skysubstrait::JoinRel& sjoin) {
     switch (sjoin.type()) {
-      case substrait::JoinRel::JOIN_TYPE_INNER:       return duckdb::JoinType::INNER;
-      case substrait::JoinRel::JOIN_TYPE_LEFT:        return duckdb::JoinType::LEFT;
-      case substrait::JoinRel::JOIN_TYPE_RIGHT:       return duckdb::JoinType::RIGHT;
-      case substrait::JoinRel::JOIN_TYPE_LEFT_SINGLE: return duckdb::JoinType::SINGLE;
-      case substrait::JoinRel::JOIN_TYPE_LEFT_SEMI:   return duckdb::JoinType::SEMI;
-      case substrait::JoinRel::JOIN_TYPE_OUTER:       return duckdb::JoinType::OUTER;
+      case skysubstrait::JoinRel::JOIN_TYPE_INNER:       return duckdb::JoinType::INNER;
+      case skysubstrait::JoinRel::JOIN_TYPE_LEFT:        return duckdb::JoinType::LEFT;
+      case skysubstrait::JoinRel::JOIN_TYPE_RIGHT:       return duckdb::JoinType::RIGHT;
+      case skysubstrait::JoinRel::JOIN_TYPE_LEFT_SINGLE: return duckdb::JoinType::SINGLE;
+      case skysubstrait::JoinRel::JOIN_TYPE_LEFT_SEMI:   return duckdb::JoinType::SEMI;
+      case skysubstrait::JoinRel::JOIN_TYPE_OUTER:       return duckdb::JoinType::OUTER;
 
       default:
         throw InternalException("Unsupported join type");
@@ -90,27 +92,27 @@ namespace duckdb {
 
 
   OrderByNode
-  DuckDBTranslator::TranslateOrder(const substrait::SortField& sordf) {
+  DuckDBTranslator::TranslateOrder(const skysubstrait::SortField& sordf) {
     OrderType       dordertype;
     OrderByNullType dnullorder;
 
     switch (sordf.direction()) {
-      case substrait::SortField::SORT_DIRECTION_ASC_NULLS_FIRST:
+      case skysubstrait::SortField::SORT_DIRECTION_ASC_NULLS_FIRST:
         dordertype = OrderType::ASCENDING;
         dnullorder = OrderByNullType::NULLS_FIRST;
         break;
 
-      case substrait::SortField::SORT_DIRECTION_ASC_NULLS_LAST:
+      case skysubstrait::SortField::SORT_DIRECTION_ASC_NULLS_LAST:
         dordertype = OrderType::ASCENDING;
         dnullorder = OrderByNullType::NULLS_LAST;
         break;
 
-      case substrait::SortField::SORT_DIRECTION_DESC_NULLS_FIRST:
+      case skysubstrait::SortField::SORT_DIRECTION_DESC_NULLS_FIRST:
         dordertype = OrderType::DESCENDING;
         dnullorder = OrderByNullType::NULLS_FIRST;
         break;
 
-      case substrait::SortField::SORT_DIRECTION_DESC_NULLS_LAST:
+      case skysubstrait::SortField::SORT_DIRECTION_DESC_NULLS_LAST:
         dordertype = OrderType::DESCENDING;
         dnullorder = OrderByNullType::NULLS_LAST;
         break;
@@ -123,7 +125,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateJoinOp(const substrait::JoinRel& sjoin) {
+  DuckDBTranslator::TranslateJoinOp(const skysubstrait::JoinRel& sjoin) {
     JoinType djointype = TranslateJoinType(sjoin);
     unique_ptr<ParsedExpression> join_condition = TranslateExpr(sjoin.expression());
 
@@ -136,7 +138,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateCrossProductOp(const substrait::CrossRel& scross) {
+  DuckDBTranslator::TranslateCrossProductOp(const skysubstrait::CrossRel& scross) {
     return make_shared_ptr<CrossProductRelation>(
        TranslateOp(scross.left())->Alias("left")
       ,TranslateOp(scross.right())->Alias("right")
@@ -144,7 +146,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateFetchOp(const substrait::FetchRel& slimit) {
+  DuckDBTranslator::TranslateFetchOp(const skysubstrait::FetchRel& slimit) {
     return make_shared_ptr<LimitRelation>(
        TranslateOp(slimit.input())
       ,slimit.count()
@@ -153,7 +155,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateFilterOp(const substrait::FilterRel& sfilter) {
+  DuckDBTranslator::TranslateFilterOp(const skysubstrait::FilterRel& sfilter) {
     return make_shared_ptr<FilterRelation>(
        TranslateOp(sfilter.input())
       ,TranslateExpr(sfilter.condition())
@@ -161,7 +163,7 @@ namespace duckdb {
   }
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateProjectOp(const substrait::ProjectRel& sproj) {
+  DuckDBTranslator::TranslateProjectOp(const skysubstrait::ProjectRel& sproj) {
     vector<unique_ptr<ParsedExpression>> expressions;
     for (auto &sexpr : sproj.expressions()) {
       expressions.push_back(TranslateExpr(sexpr));
@@ -181,7 +183,7 @@ namespace duckdb {
 
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateAggregateOp(const substrait::AggregateRel& saggr) {
+  DuckDBTranslator::TranslateAggregateOp(const skysubstrait::AggregateRel& saggr) {
     vector<unique_ptr<ParsedExpression>> groups, expressions;
 
     if (saggr.groupings_size() > 0) {
@@ -305,14 +307,14 @@ namespace duckdb {
       case SFileFormatType::kExtension:
       default:
         throw duckdb::NotImplementedException(
-          "Unsupported type of local file for read operator on substrait"
+          "[test] Unsupported type of local file for read operator on substrait"
         );
     }
   }
 
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateReadOp(const substrait::ReadRel& sget) {
+  DuckDBTranslator::TranslateReadOp(const skysubstrait::ReadRel& sget) {
 
     // Construct a scan relation based on the ReadRel's source type
     shared_ptr<Relation> scan;
@@ -353,7 +355,7 @@ namespace duckdb {
 
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateSortOp(const substrait::SortRel &ssort) {
+  DuckDBTranslator::TranslateSortOp(const skysubstrait::SortRel &ssort) {
     vector<OrderByNode> order_nodes;
     for (auto &sordf : ssort.sorts()) {
       order_nodes.push_back(TranslateOrder(sordf));
@@ -364,7 +366,7 @@ namespace duckdb {
 
 
   shared_ptr<Relation>
-  DuckDBTranslator::TranslateSetOp(const substrait::SetRel &sset) {
+  DuckDBTranslator::TranslateSetOp(const skysubstrait::SetRel &sset) {
     // TODO: see if this is necessary for some cases
     // D_ASSERT(sop.has_set());
 
@@ -383,8 +385,8 @@ namespace duckdb {
 
 
   //! Translate Substrait Operations to DuckDB Relations
-  using SRelType = substrait::Rel::RelTypeCase;
-  shared_ptr<Relation> DuckDBTranslator::TranslateOp(const substrait::Rel& sop) {
+  using SRelType = skysubstrait::Rel::RelTypeCase;
+  shared_ptr<Relation> DuckDBTranslator::TranslateOp(const skysubstrait::Rel& sop) {
     switch (sop.rel_type_case()) {
       case SRelType::kJoin:          return TranslateJoinOp        (sop.join());
       case SRelType::kCross:         return TranslateCrossProductOp(sop.cross());
@@ -405,7 +407,7 @@ namespace duckdb {
 
 
   //! Translates Substrait Plan Root To a DuckDB Relation
-  shared_ptr<Relation> DuckDBTranslator::TranslateRootOp(const substrait::RelRoot& sop) {
+  shared_ptr<Relation> DuckDBTranslator::TranslateRootOp(const skysubstrait::RelRoot& sop) {
     vector<string> aliases;
     vector<unique_ptr<ParsedExpression>> expressions;
 

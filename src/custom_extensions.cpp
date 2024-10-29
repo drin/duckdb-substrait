@@ -2,10 +2,13 @@
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/string_util.hpp"
 
+namespace skysubstrait = skytether::substrait;
+
+
 namespace duckdb {
 
 // FIXME: This cannot be the best way of getting string names of the types
-string TransformTypes(const substrait::Type &type) {
+string TransformTypes(const skysubstrait::Type &type) {
 	auto str = type.DebugString();
 	string str_type;
 	for (auto &c : str) {
@@ -160,7 +163,7 @@ bool SubstraitFunctionExtensions::IsNative() const {
 
 SubstraitCustomFunctions::SubstraitCustomFunctions() { Initialize(); }
 
-vector<string> SubstraitCustomFunctions::GetTypes(const vector<substrait::Type> &types) {
+vector<string> SubstraitCustomFunctions::GetTypes(const vector<skysubstrait::Type> &types) {
 	vector<string> transformed_types;
 	for (auto &type : types) {
 		transformed_types.emplace_back(TransformTypes(type));
@@ -170,7 +173,7 @@ vector<string> SubstraitCustomFunctions::GetTypes(const vector<substrait::Type> 
 
 // FIXME: We might have to do DuckDB extensions at some point
 SubstraitFunctionExtensions SubstraitCustomFunctions::Get(const string &name,
-                                                          const vector<substrait::Type> &types) const {
+                                                          const vector<skysubstrait::Type> &types) const {
 	vector<string> transformed_types;
 	if (types.empty()) {
 		SubstraitCustomFunction custom_function {name, {}};
