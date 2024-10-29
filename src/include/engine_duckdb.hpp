@@ -66,6 +66,8 @@
 // ------------------------------
 // Convenience aliases
 
+namespace skysubstrait = skytether::substrait;
+
 using duckdb::unique_ptr;
 using std::string;
 
@@ -91,7 +93,7 @@ namespace duckdb {
   void   AssertValidDateSubfield(const string& subfield);
 
   //! Convenience function to convert a substrait type to a logical duckdb type
-  LogicalType SubstraitToDuckType(const substrait::Type& s_type);
+  LogicalType SubstraitToDuckType(const skysubstrait::Type& s_type);
 
 } // namespace: duckdb
 
@@ -160,49 +162,49 @@ namespace duckdb {
     private:
       // Helpers for TranslateReadOp
       shared_ptr<Relation>
-      ScanNamedTable(const substrait::ReadRel::NamedTable& named_table);
+      ScanNamedTable(const skysubstrait::ReadRel::NamedTable& named_table);
 
       shared_ptr<Relation>
-      ScanFileListParquet(const substrait::ReadRel::LocalFiles& local_files);
+      ScanFileListParquet(const skysubstrait::ReadRel::LocalFiles& local_files);
 
       shared_ptr<Relation>
-      ScanFileListArrow(const substrait::ReadRel::LocalFiles& local_files);
+      ScanFileListArrow(const skysubstrait::ReadRel::LocalFiles& local_files);
 
       shared_ptr<Relation>
-      ScanFileList(const substrait::ReadRel::LocalFiles& local_files);
+      ScanFileList(const skysubstrait::ReadRel::LocalFiles& local_files);
 
-      shared_ptr<Relation> TranslateRootOp(const substrait::RelRoot& sop);
-      shared_ptr<Relation> TranslateOp    (const substrait::Rel&     sop);
+      shared_ptr<Relation> TranslateRootOp(const skysubstrait::RelRoot& sop);
+      shared_ptr<Relation> TranslateOp    (const skysubstrait::Rel&     sop);
 
       //! Translate a substrait expression to a duckdb expression
-      unique_ptr<ParsedExpression> TranslateExpr(const substrait::Expression &sexpr);
+      unique_ptr<ParsedExpression> TranslateExpr(const skysubstrait::Expression &sexpr);
 
       // >> Internal translation functions for operators
       // NOTE: these member methods eventually use t_conn and functions_map
-      shared_ptr<Relation> TranslateJoinOp         (const substrait::JoinRel&      sjoin);
-      shared_ptr<Relation> TranslateCrossProductOp (const substrait::CrossRel&     scross);
-      shared_ptr<Relation> TranslateFetchOp        (const substrait::FetchRel&     slimit);
-      shared_ptr<Relation> TranslateFilterOp       (const substrait::FilterRel&    sfilter);
-      shared_ptr<Relation> TranslateProjectOp      (const substrait::ProjectRel&   sproj);
-      shared_ptr<Relation> TranslateAggregateOp    (const substrait::AggregateRel& saggr);
-      shared_ptr<Relation> TranslateReadOp         (const substrait::ReadRel&      sget);
-      shared_ptr<Relation> TranslateSortOp         (const substrait::SortRel&      ssort);
-      shared_ptr<Relation> TranslateSetOp          (const substrait::SetRel&       sset);
+      shared_ptr<Relation> TranslateJoinOp         (const skysubstrait::JoinRel&      sjoin);
+      shared_ptr<Relation> TranslateCrossProductOp (const skysubstrait::CrossRel&     scross);
+      shared_ptr<Relation> TranslateFetchOp        (const skysubstrait::FetchRel&     slimit);
+      shared_ptr<Relation> TranslateFilterOp       (const skysubstrait::FilterRel&    sfilter);
+      shared_ptr<Relation> TranslateProjectOp      (const skysubstrait::ProjectRel&   sproj);
+      shared_ptr<Relation> TranslateAggregateOp    (const skysubstrait::AggregateRel& saggr);
+      shared_ptr<Relation> TranslateReadOp         (const skysubstrait::ReadRel&      sget);
+      shared_ptr<Relation> TranslateSortOp         (const skysubstrait::SortRel&      ssort);
+      shared_ptr<Relation> TranslateSetOp          (const skysubstrait::SetRel&       sset);
 
       //! Translate Substrait Sort Order to DuckDB Order
-      OrderByNode TranslateOrder(const substrait::SortField& sordf);
+      OrderByNode TranslateOrder(const skysubstrait::SortField& sordf);
 
       // >> Internal translation functions for expressions
-      unique_ptr<ParsedExpression> TranslateSelectionExpr(const substrait::Expression& sexpr);
-      unique_ptr<ParsedExpression> TranslateIfThenExpr   (const substrait::Expression& sexpr);
-      unique_ptr<ParsedExpression> TranslateCastExpr     (const substrait::Expression& sexpr);
-      unique_ptr<ParsedExpression> TranslateInExpr       (const substrait::Expression& sexpr);
+      unique_ptr<ParsedExpression> TranslateSelectionExpr(const skysubstrait::Expression& sexpr);
+      unique_ptr<ParsedExpression> TranslateIfThenExpr   (const skysubstrait::Expression& sexpr);
+      unique_ptr<ParsedExpression> TranslateCastExpr     (const skysubstrait::Expression& sexpr);
+      unique_ptr<ParsedExpression> TranslateInExpr       (const skysubstrait::Expression& sexpr);
 
       unique_ptr<ParsedExpression>
-      TranslateLiteralExpr(const substrait::Expression::Literal& slit);
+      TranslateLiteralExpr(const skysubstrait::Expression::Literal& slit);
 
       unique_ptr<ParsedExpression>
-      TranslateScalarFunctionExpr(const substrait::Expression& sexpr);
+      TranslateScalarFunctionExpr(const skysubstrait::Expression& sexpr);
   };
 
   struct DuckDBExecutor {

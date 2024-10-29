@@ -25,6 +25,8 @@
 // ------------------------------
 // Macros and Type Aliases
 
+namespace skysubstrait = skytether::substrait;
+
 
 // ------------------------------
 // Classes and structs
@@ -35,7 +37,7 @@ namespace mohair {
   // Methods for SubstraitFunctionMap
 
   //! Register extension functions from the substrait plan in the function map
-  void SubstraitFunctionMap::RegisterExtensionFunctions(substrait::Plan& plan) {
+  void SubstraitFunctionMap::RegisterExtensionFunctions(skysubstrait::Plan& plan) {
     for (auto &sext : plan.extensions()) {
       if (!sext.has_extension_function()) { continue; }
 
@@ -59,8 +61,9 @@ namespace mohair {
   // Builder Functions for SystemPlan
 
   //! Builder function that constructs SystemPlan from a serialized substrait message
-  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitMessage(const string& serialized_msg) {
-    auto plan = duckdb::make_uniq<substrait::Plan>();
+  unique_ptr<skysubstrait::Plan>
+  SubstraitPlanFromSubstraitMessage(const string& serialized_msg) {
+    auto plan = duckdb::make_uniq<skysubstrait::Plan>();
     if (not plan->ParseFromString(serialized_msg)) {
       throw std::runtime_error("Error parsing serialized Substrait Plan");
     }
@@ -69,8 +72,9 @@ namespace mohair {
   }
 
   //! Builder function that constructs SystemPlan from a JSON-formatted substrait message
-  unique_ptr<substrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg) {
-    auto plan = duckdb::make_uniq<substrait::Plan>();
+  unique_ptr<skysubstrait::Plan>
+  SubstraitPlanFromSubstraitJson(const string& json_msg) {
+    auto plan = duckdb::make_uniq<skysubstrait::Plan>();
 
     ProtoStatus status = JsonStringToMessage(json_msg, plan.get());
     if (not status.ok()) {
