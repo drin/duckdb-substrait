@@ -26,6 +26,7 @@
 // Macros and Type Aliases
 
 namespace skysubstrait = skytether::substrait;
+namespace skymohair    = skytether::mohair;
 
 using NamedTable = skysubstrait::ReadRel::NamedTable;
 using LocalFiles = skysubstrait::ReadRel::LocalFiles;
@@ -384,6 +385,34 @@ namespace duckdb {
   }
 
 
+  shared_ptr<Relation>
+  DuckDBTranslator::TranslateSkyRel(const skymohair::SkyRel& sky_rel) {
+    vector<Value> slice_names;
+    string table_name { sky_rel.domain() + "/" + sky_rel.partition() };
+
+    // In this case, we iterate over slices() to get slice indices
+    if (not sky_rel.slices().empty()) {
+      for (int slice_id = 0; slice_id < sky_rel.slices_size(); ++slice_id) {
+        slice_names.emplace_back(table_name + "-" + std::to_string(sky_rel.slices(slice_id)));
+      }
+    }
+
+    // In this case, we generate slice indices up to the last index
+    // NOTE: hardcoded for now due to lazyness
+    else {
+      for (uint32_t slice_ndx = 0; slice_ndx < 10; ++slice_ndx) {
+        slice_names.emplace_back(table_name + "-" + std::to_string(slice_ndx));
+      }
+    }
+
+    // We expect the arrow files to contain arrow stream formatted data
+    return (
+      t_conn->TableFunction("scan_arrows_file", {Value::LIST(slice_names)})
+            ->Alias(table_name)
+    );
+  }
+
+
   //! Translate Substrait Operations to DuckDB Relations
   using SRelType = skysubstrait::Rel::RelTypeCase;
   shared_ptr<Relation> DuckDBTranslator::TranslateOp(const skysubstrait::Rel& sop) {
@@ -397,7 +426,27 @@ namespace duckdb {
       case SRelType::kRead:          return TranslateReadOp        (sop.read());
       case SRelType::kSort:          return TranslateSortOp        (sop.sort());
       case SRelType::kSet:           return TranslateSetOp         (sop.set());
-      case SRelType::kExtensionLeaf:
+
+      case SRelType::kExtensionLeaf: {
+        auto& leaf_rel = sop.extension_leaf().detail();
+        if (not leaf_rel.Is<skymohair::SkyRel>()) {
+          std::cerr << "Unsupported extension type: " << leaf_rel.descriptor()->name() << std::endl;
+          throw InternalException("Unsupported extension type");
+        }
+
+        skymohair::SkyRel sky_rel;
+        leaf_rel.UnpackTo(&sky_rel);
+
+        auto duck_rel = TranslateSkyRel(sky_rel);
+        if (duck_rel == nullptr) {
+          throw InternalException("Support for SkyRel in progress");
+        }
+        else {
+          return duck_rel;
+        }
+
+      }
+
       default:
         throw InternalException(
           "Unsupported relation type " + to_string(sop.rel_type_case())

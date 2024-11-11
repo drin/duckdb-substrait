@@ -67,6 +67,7 @@
 // Convenience aliases
 
 namespace skysubstrait = skytether::substrait;
+namespace skymohair    = skytether::mohair;
 
 using duckdb::unique_ptr;
 using std::string;
@@ -190,6 +191,8 @@ namespace duckdb {
       shared_ptr<Relation> TranslateReadOp         (const skysubstrait::ReadRel&      sget);
       shared_ptr<Relation> TranslateSortOp         (const skysubstrait::SortRel&      ssort);
       shared_ptr<Relation> TranslateSetOp          (const skysubstrait::SetRel&       sset);
+
+      shared_ptr<Relation> TranslateSkyRel         (const skymohair::SkyRel& sky_rel);
 
       //! Translate Substrait Sort Order to DuckDB Order
       OrderByNode TranslateOrder(const skysubstrait::SortField& sordf);

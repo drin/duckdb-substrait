@@ -29,12 +29,14 @@
 
 #include "skytether/substrait/plan.pb.h"
 #include "skytether/substrait/algebra.pb.h"
+#include "skytether/mohair/algebra.pb.h"
 
 
 // ------------------------------
 // Macros and Type Aliases
 
 namespace skysubstrait = skytether::substrait;
+namespace skymohair    = skytether::mohair;
 
 // Standard types
 using std::string;
