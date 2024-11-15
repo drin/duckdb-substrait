@@ -410,15 +410,7 @@ namespace duckdb {
     auto fn_data = make_uniq<FnDataSubstraitTranslation>();
     fn_data->translator       = make_uniq<DuckDBTranslator>(context);
     fn_data->sys_plan         = fn_data->translator->TranslatePlanMessage(plan_msg);
-    fn_data->plan_data        = make_shared_ptr<PreparedStatementData>(StatementType::SELECT_STATEMENT);
     fn_data->enable_optimizer = GetOptimizationOption(context.config, input.named_parameters);
-
-    // For us to further build PreparedStatementData
-    // (probably affects our ResultCollector)
-    for (auto &column : fn_data->sys_plan->engine->Columns()) {
-      fn_data->plan_data->types.emplace_back(column.Type());
-      fn_data->plan_data->names.emplace_back(column.Name());
-    }
 
     // Set result schema (binding)
     return_types.emplace_back(LogicalType::VARCHAR);
@@ -534,7 +526,7 @@ namespace duckdb {
   //! Create a TableFunction, "translate_mohair", then register it with the catalog
   void InitializeTranslateMohair(Connection &con) {
     TableFunction tablefn_mohair(
-       "translate_mohair"
+       "explain_mohair"
       ,{ LogicalType::BLOB }
       ,TableFnTranslateMohair
       ,BindingFnTranslateMohair
