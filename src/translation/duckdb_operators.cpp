@@ -385,8 +385,19 @@ namespace duckdb {
   }
 
 
+  //! A SkyRel is assumed to be a lookup against a skytether catalog
   shared_ptr<Relation>
   DuckDBTranslator::TranslateSkyRel(const skymohair::SkyRel& sky_rel) {
+    string sky_relname { sky_rel.domain() + "/" + sky_rel.partition() };
+
+    try         { return t_conn->Table(sky_relname); }
+    catch (...) { return t_conn->View (sky_relname); }
+  }
+
+  //! A SkyPartitionRel is assumed to be a filesystem lookup against a partition (need to
+  //  find names of each slice contained in the partition).
+  shared_ptr<Relation>
+  DuckDBTranslator::TranslateSkyPartitionRel(const skymohair::SkyPartitionRel& sky_rel) {
     vector<Value> slice_names;
     string table_name { sky_rel.domain() + "/" + sky_rel.partition() };
 
@@ -412,41 +423,73 @@ namespace duckdb {
     );
   }
 
+  //! A SkySliceRel is assumed to be a filesystem lookup against a single slice ("as-is").
+  shared_ptr<Relation>
+  DuckDBTranslator::TranslateSkySliceRel(const skymohair::SkySliceRel& sky_rel) {
+    vector<Value> slice_names;
+    slice_names.emplace_back(sky_rel.slice_key());
+
+    // We expect the arrow files to contain arrow stream formatted data
+    string table_name { sky_rel.domain() + "/" + sky_rel.partition() };
+    return (
+      t_conn->TableFunction("scan_arrows_file", {Value::LIST(slice_names)})
+            ->Alias(table_name)
+    );
+  }
+
+  shared_ptr<Relation>
+  DuckDBTranslator::TranslateExtensionLeafOp(const skysubstrait::ExtensionLeafRel& leaf_rel) {
+    shared_ptr<Relation> translated_rel { nullptr };
+
+    if (not leaf_rel.has_detail()) {
+      throw InternalException("ExtensionLeaf op is missing extension details");
+    }
+
+    // Figure out which type of extension operator it is
+    auto& extension_msg = leaf_rel.detail();
+    if (extension_msg.Is<skymohair::SkyRel>()) { 
+      skymohair::SkyRel sky_rel;
+      extension_msg.UnpackTo(&sky_rel);
+
+      translated_rel = TranslateSkyRel(sky_rel);
+    }
+
+    else if (extension_msg.Is<skymohair::SkyPartitionRel>()) { 
+      skymohair::SkyPartitionRel sky_rel;
+      extension_msg.UnpackTo(&sky_rel);
+
+      translated_rel = TranslateSkyPartitionRel(sky_rel);
+    }
+
+    else if (extension_msg.Is<skymohair::SkySliceRel>()) { 
+      skymohair::SkySliceRel sky_rel;
+      extension_msg.UnpackTo(&sky_rel);
+
+      translated_rel = TranslateSkySliceRel(sky_rel);
+    }
+
+    // If a translator was matched and it succeeded, return the translated sub-plan
+    if (translated_rel != nullptr) { return translated_rel; }
+
+    // Otherwise, throw an exception
+    std::cerr << "Unsupported extension type: " << extension_msg.descriptor()->name() << std::endl;
+    throw InternalException("Unsupported extension type");
+  }
 
   //! Translate Substrait Operations to DuckDB Relations
   using SRelType = skysubstrait::Rel::RelTypeCase;
   shared_ptr<Relation> DuckDBTranslator::TranslateOp(const skysubstrait::Rel& sop) {
     switch (sop.rel_type_case()) {
-      case SRelType::kJoin:          return TranslateJoinOp        (sop.join());
-      case SRelType::kCross:         return TranslateCrossProductOp(sop.cross());
-      case SRelType::kFetch:         return TranslateFetchOp       (sop.fetch());
-      case SRelType::kFilter:        return TranslateFilterOp      (sop.filter());
-      case SRelType::kProject:       return TranslateProjectOp     (sop.project());
-      case SRelType::kAggregate:     return TranslateAggregateOp   (sop.aggregate());
-      case SRelType::kRead:          return TranslateReadOp        (sop.read());
-      case SRelType::kSort:          return TranslateSortOp        (sop.sort());
-      case SRelType::kSet:           return TranslateSetOp         (sop.set());
-
-      case SRelType::kExtensionLeaf: {
-        auto& leaf_rel = sop.extension_leaf().detail();
-        if (not leaf_rel.Is<skymohair::SkyRel>()) {
-          std::cerr << "Unsupported extension type: " << leaf_rel.descriptor()->name() << std::endl;
-          throw InternalException("Unsupported extension type");
-        }
-
-        skymohair::SkyRel sky_rel;
-        leaf_rel.UnpackTo(&sky_rel);
-
-        auto duck_rel = TranslateSkyRel(sky_rel);
-        if (duck_rel == nullptr) {
-          throw InternalException("Support for SkyRel in progress");
-        }
-        else {
-          return duck_rel;
-        }
-
-      }
-
+      case SRelType::kJoin:          return TranslateJoinOp         (sop.join());
+      case SRelType::kCross:         return TranslateCrossProductOp (sop.cross());
+      case SRelType::kFetch:         return TranslateFetchOp        (sop.fetch());
+      case SRelType::kFilter:        return TranslateFilterOp       (sop.filter());
+      case SRelType::kProject:       return TranslateProjectOp      (sop.project());
+      case SRelType::kAggregate:     return TranslateAggregateOp    (sop.aggregate());
+      case SRelType::kRead:          return TranslateReadOp         (sop.read());
+      case SRelType::kSort:          return TranslateSortOp         (sop.sort());
+      case SRelType::kSet:           return TranslateSetOp          (sop.set());
+      case SRelType::kExtensionLeaf: return TranslateExtensionLeafOp(sop.extension_leaf());
       default:
         throw InternalException(
           "Unsupported relation type " + to_string(sop.rel_type_case())

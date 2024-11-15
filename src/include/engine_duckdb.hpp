@@ -114,11 +114,10 @@ namespace duckdb {
     shared_ptr<DuckSystemPlan>        sys_plan;
     shared_ptr<DuckLogicalPlan>       engine_plan;
     shared_ptr<DuckPhysicalPlan>      exec_plan;
-    shared_ptr<PreparedStatementData> plan_data;
+
     bool                              enable_optimizer;
     bool                              finished { false };
   };
-
 
   struct FnDataSubstraitExecution : public TableFunctionData {
     FnDataSubstraitExecution() = default;
@@ -150,7 +149,7 @@ namespace duckdb {
     //! Transforms DuckDB Relation to DuckDB Logical Operator
     shared_ptr<DuckLogicalPlan>  TranspilePlanMessage(shared_ptr<DuckSystemPlan> sys_plan);
 
-    //! Transforms DuckDB Relation to DuckDB Physical Operator
+    //! Transforms DuckDB Logical Operator to DuckDB Physical Operator
     shared_ptr<DuckPhysicalPlan> TranslateLogicalPlan( shared_ptr<DuckLogicalPlan> engine_plan
                                                       ,bool                        optimize);
 
@@ -182,17 +181,20 @@ namespace duckdb {
 
       // >> Internal translation functions for operators
       // NOTE: these member methods eventually use t_conn and functions_map
-      shared_ptr<Relation> TranslateJoinOp         (const skysubstrait::JoinRel&      sjoin);
-      shared_ptr<Relation> TranslateCrossProductOp (const skysubstrait::CrossRel&     scross);
-      shared_ptr<Relation> TranslateFetchOp        (const skysubstrait::FetchRel&     slimit);
-      shared_ptr<Relation> TranslateFilterOp       (const skysubstrait::FilterRel&    sfilter);
-      shared_ptr<Relation> TranslateProjectOp      (const skysubstrait::ProjectRel&   sproj);
-      shared_ptr<Relation> TranslateAggregateOp    (const skysubstrait::AggregateRel& saggr);
-      shared_ptr<Relation> TranslateReadOp         (const skysubstrait::ReadRel&      sget);
-      shared_ptr<Relation> TranslateSortOp         (const skysubstrait::SortRel&      ssort);
-      shared_ptr<Relation> TranslateSetOp          (const skysubstrait::SetRel&       sset);
+      shared_ptr<Relation> TranslateJoinOp         (const skysubstrait::JoinRel&          sjoin);
+      shared_ptr<Relation> TranslateCrossProductOp (const skysubstrait::CrossRel&         scross);
+      shared_ptr<Relation> TranslateFetchOp        (const skysubstrait::FetchRel&         slimit);
+      shared_ptr<Relation> TranslateFilterOp       (const skysubstrait::FilterRel&        sfilter);
+      shared_ptr<Relation> TranslateProjectOp      (const skysubstrait::ProjectRel&       sproj);
+      shared_ptr<Relation> TranslateAggregateOp    (const skysubstrait::AggregateRel&     saggr);
+      shared_ptr<Relation> TranslateReadOp         (const skysubstrait::ReadRel&          sget);
+      shared_ptr<Relation> TranslateSortOp         (const skysubstrait::SortRel&          ssort);
+      shared_ptr<Relation> TranslateSetOp          (const skysubstrait::SetRel&           sset);
+      shared_ptr<Relation> TranslateExtensionLeafOp(const skysubstrait::ExtensionLeafRel& leaf_rel);
 
-      shared_ptr<Relation> TranslateSkyRel         (const skymohair::SkyRel& sky_rel);
+      shared_ptr<Relation> TranslateSkyRel         (const skymohair::SkyRel&          sky_rel);
+      shared_ptr<Relation> TranslateSkyPartitionRel(const skymohair::SkyPartitionRel& sky_rel);
+      shared_ptr<Relation> TranslateSkySliceRel    (const skymohair::SkySliceRel&     sky_rel);
 
       //! Translate Substrait Sort Order to DuckDB Order
       OrderByNode TranslateOrder(const skysubstrait::SortField& sordf);
