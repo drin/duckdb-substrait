@@ -123,7 +123,7 @@ namespace duckdb {
     return std::nullopt;
   }
 
-  static std::optional<bool>
+  static bool
   GetOptimizationOption(const ClientConfig& config, const duckdb::named_parameter_map_t& named_params) {
     auto optimizer_optval = GetOption(config, named_params, "enable_optimizer");
     return optimizer_optval.value_or(config.enable_optimizer);
@@ -138,7 +138,7 @@ namespace duckdb {
 
     // set 'strict' attribute
     auto strict_optval = GetOption(config, input.named_parameters, "strict");
-    if (strict_optval.has_value()) { result->strict = strict_opval.value(); }
+    if (strict_optval.has_value()) { result->strict = strict_optval.value(); }
 
     return result;
   }
@@ -254,6 +254,19 @@ namespace duckdb {
     output.SetValue(0, 0, Value::BLOB_RAW(serialized));
   }
 
+  static void
+  ToJsonFunctionInternal(ClientContext               &context,
+                         ToSubstraitFunctionData     &data,
+                         DataChunk                   &output,
+                         unique_ptr<LogicalOperator> &query_plan,
+                         string                      &serialized) {
+    output.SetCardinality(1);
+    query_plan = data.ExtractPlan(context);
+    auto transformer_d2s = DuckDBToSubstrait(context, *query_plan, data.strict);
+    serialized = transformer_d2s.SerializeToJson();
+    output.SetValue(0, 0, serialized);
+  }
+
   static void ToSubFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
     auto &data = data_p.bind_data->CastNoConst<ToSubstraitFunctionData>();
     if (data.finished) { return; }
@@ -271,19 +284,6 @@ namespace duckdb {
     other_output.Initialize(context, {LogicalType::VARCHAR});
     ToJsonFunctionInternal(context, data, other_output, query_plan, serialized);
     VerifyJSONRoundtrip(query_plan, context, data, serialized);
-  }
-
-  static void
-  ToJsonFunctionInternal(ClientContext               &context,
-                         ToSubstraitFunctionData     &data,
-                         DataChunk                   &output,
-                         unique_ptr<LogicalOperator> &query_plan,
-                         string                      &serialized) {
-    output.SetCardinality(1);
-    query_plan = data.ExtractPlan(context);
-    auto transformer_d2s = DuckDBToSubstrait(context, *query_plan, data.strict);
-    serialized = transformer_d2s.SerializeToJson();
-    output.SetValue(0, 0, serialized);
   }
 
   static void ToJsonFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
