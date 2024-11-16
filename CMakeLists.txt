@@ -121,7 +121,8 @@ build_loadable_extension(${EXT_BASENAME}
 # ------------------------------
 # Targets in sub-directories
 
-add_subdirectory("test/c")
+# NOTE: test/c/CMakeLists.txt assumes there is a /duckdb directory
+# add_subdirectory("test/c")
 
 
 # ------------------------------
