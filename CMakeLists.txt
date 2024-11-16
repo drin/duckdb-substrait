@@ -122,9 +122,10 @@ build_loadable_extension(${EXT_BASENAME}
 # Targets in sub-directories
 
 IF (DEFINED ENV{SKIP_SUBSTRAIT_C_TESTS})
-    message(STATUS "Skipping substrait c tests")
+  message(STATUS "Skipping substrait c tests")
 ELSE()
-    add_subdirectory("test/c")
+  # NOTE: test/c/CMakeLists.txt assumes there is a /duckdb directory
+  # add_subdirectory("test/c")
 ENDIF()
 
 
