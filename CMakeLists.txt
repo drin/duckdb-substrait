@@ -26,21 +26,42 @@ endif()
 
 
 # >> Prebuilt (managed by us but built independently)
-
-# library for mohair-substrait
 # TODO: figure out how to push some logic into a FindPackage or Config file
-find_library(MohairSubstrait_LIBRARIES libmohair-substrait.a REQUIRED)
-if(MohairSubstrait_LIBRARIES-NOTFOUND)
-  message(FATAL_ERROR "Could not find mohair-substrait")
+
+# NOTE: this seems stupid but I haven't found anything to make this simpler
+set(suffix_sharedlib ".so")
+if(APPLE)
+  set(suffix_sharedlib ".dylib")
+endif()
+
+# |> library for mohair-substrait
+
+# check for shared library first
+find_library(MohairSubstrait_LIBRARIES "libmohair-substrait${suffix_sharedlib}")
+
+if(${MohairSubstrait_LIBRARIES} STREQUAL "MohairSubstrait_LIBRARIES-NOTFOUND")
+
+  # otherwise, check for static library
+  message(STATUS "Searching for mohair-substrait static libraries")
+  find_library(MohairSubstrait_LIBRARIES libmohair-substrait.a REQUIRED)
+
+  if(${MohairSubstrait_LIBRARIES} STREQUAL "MohairSubstrait_LIBRARIES-NOTFOUND")
+    message(FATAL_ERROR "Could not find mohair-substrait")
+
+  else()
+    message(STATUS "Found mohair-substrait static libraries: " ${MohairSubstrait_LIBRARIES})
+
+  endif()
 
 else()
-  message(STATUS "Found mohair-substrait libraries: " ${MohairSubstrait_LIBRARIES})
+  message(STATUS "Found mohair-substrait shared libraries: " ${MohairSubstrait_LIBRARIES})
 
 endif()
 
 # headers for mohair-substrait
 find_path(MohairSubstrait_INCLUDE_DIRS mohair-substrait REQUIRED)
-if(MohairSubstrait_INCLUDE_DIRS-NOTFOUND)
+
+if(${MohairSubstrait_INCLUDE_DIRS} STREQUAL "MohairSubstrait_INCLUDE_DIRS-NOTFOUND")
   message(FATAL_ERROR "Could not find mohair-substrait include dir")
 
 else()
@@ -49,7 +70,7 @@ else()
 endif()
 
 # We set these to look like what we want a FindPackage to eventually publish
-set(MohairSubstrait::libmohair-substrat ${MohairSubstrait_LIBRARIES})
+set(MohairSubstrait::libmohair-substrait ${MohairSubstrait_LIBRARIES})
 
 # NOTE: this breaks our hack for `build_loadable_extension`
 # list(APPEND MohairSubstrait_INCLUDE_DIRS
