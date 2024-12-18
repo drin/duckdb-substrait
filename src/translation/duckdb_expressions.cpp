@@ -25,7 +25,7 @@
 // ------------------------------
 // Aliases
 
-namespace skysubstrait = skytether::substrait;
+namespace skysubstrait = skyproto::substrait;
 
 
 // ------------------------------

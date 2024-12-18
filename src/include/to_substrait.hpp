@@ -16,12 +16,12 @@
 #include "duckdb/planner/joinside.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/table_filter.hpp"
-#include "skytether/substrait/algebra.pb.h"
-#include "skytether/substrait/plan.pb.h"
+#include "skyproto/substrait/algebra.pb.h"
+#include "skyproto/substrait/plan.pb.h"
 #include <string>
 #include <unordered_map>
 
-namespace skysubstrait = skytether::substrait;
+namespace skysubstrait = skyproto::substrait;
 
 namespace duckdb {
 class DuckDBToSubstrait {

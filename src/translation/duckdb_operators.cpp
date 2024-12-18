@@ -25,8 +25,8 @@
 // ------------------------------
 // Macros and Type Aliases
 
-namespace skysubstrait = skytether::substrait;
-namespace skymohair    = skytether::mohair;
+namespace skysubstrait = skyproto::substrait;
+namespace skymohair    = skyproto::mohair;
 
 using NamedTable = skysubstrait::ReadRel::NamedTable;
 using LocalFiles = skysubstrait::ReadRel::LocalFiles;

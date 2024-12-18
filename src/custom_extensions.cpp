@@ -2,7 +2,7 @@
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/string_util.hpp"
 
-namespace skysubstrait = skytether::substrait;
+namespace skysubstrait = skyproto::substrait;
 
 
 namespace duckdb {
@@ -22,15 +22,12 @@ string TransformTypes(const skysubstrait::Type &type) {
 
 vector<string> GetAllTypes() {
 	return {
-     {"bool"}
-    ,{"i8"}                 , {"i16"}         , {"i32"}         , {"i64"}
-    ,{"fp32"}               , {"fp64"}
-    ,{"string"}             , {"binary"}
-    ,{"timestamp"}          , {"date"}        , {"time"}
-    ,{"interval_year"}      , {"interval_day"}, {"timestamp_tz"}
-    ,{"uuid"}
-    ,{"varchar"}            , {"fixed_binary"}, {"decimal"}
-    ,{"precision_timestamp"}, {"precision_timestamp_tz"}
+     "bool"
+    ,"i8",  "i16", "i32", "i64", "fp32", "fp64"
+    ,"string", "binary"
+    ,"timestamp", "date", "time","interval_year", "interval_day", "timestamp_tz"
+    ,"uuid", "varchar", "fixed_binary", "decimal"
+    ,"precision_timestamp", "precision_timestamp_tz"
   };
 }
 
