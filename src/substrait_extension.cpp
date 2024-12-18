@@ -426,21 +426,20 @@ namespace duckdb {
     auto &fn_data = (FnDataSubstraitTranslation&) *(data_p.bind_data);
     if (fn_data.finished) { return; }
 
-    if (not fn_data.exec_plan) {
+    if (not fn_data.physical_plan) {
       // Convert plan to engine plan
-      fn_data.engine_plan = fn_data.translator->TranspilePlanMessage(fn_data.sys_plan);
+      fn_data.logical_plan = fn_data.translator->TranspilePlanMessage(*(fn_data.sys_plan->duck_plan));
 
       // Convert engine plan to execution plan
-      fn_data.exec_plan = fn_data.translator->TranslateLogicalPlan(
-        fn_data.engine_plan, fn_data.enable_optimizer
+      fn_data.physical_plan = fn_data.translator->TranslateLogicalPlan(
+        *(fn_data.logical_plan), fn_data.enable_optimizer
       );
 
       fn_data.finished = true;
     }
 
-    // output.Initialize(context, { LogicalType::VARCHAR }, 1);
     output.SetCardinality(1);
-    output.SetValue(0, 0, fn_data.exec_plan->engine->ToString());
+    output.SetValue(0, 0, fn_data.physical_plan->ToString());
   }
 
 
@@ -458,16 +457,23 @@ namespace duckdb {
 
     string plan_msg { input.inputs[0].GetValueUnsafe<string>() };
 
-    auto result = make_uniq<FnDataSubstraitExecution>();
-    result->translator = make_uniq<DuckDBTranslator>(context);
-    result->sys_plan   = result->translator->TranslatePlanMessage(plan_msg);
+    auto fn_data = make_uniq<FnDataSubstraitExecution>();
+    fn_data->translator = make_uniq<DuckDBTranslator>(context);
+    fn_data->sys_plan   = fn_data->translator->TranslatePlanMessage(plan_msg);
+    fn_data->plan_data  = make_shared_ptr<PreparedStatementData>(StatementType::SELECT_STATEMENT);
 
-    for (auto &column : result->sys_plan->engine->Columns()) {
+    Relation& duck_plan = *(fn_data->sys_plan->duck_plan);
+    for (auto &column : duck_plan.Columns()) {
+      // This is for the output schema of this TableFunction
       return_types.emplace_back(column.Type());
       names.emplace_back(column.Name());
+
+      // This is for the PreparedStatementData
+      fn_data->plan_data->types.emplace_back(column.Type());
+      fn_data->plan_data->names.emplace_back(column.Name());
     }
 
-    return result;
+    return fn_data;
   }
 
   static void
@@ -476,9 +482,18 @@ namespace duckdb {
                        ,DataChunk&          output) {
     auto& fn_data = (FnDataSubstraitExecution&) *(data_p.bind_data);
 
-    if (!fn_data.result) {
-      fn_data.result = fn_data.sys_plan->engine->Execute();
+    if (not fn_data.executor) {
+      // Convert plan to engine plan
+      fn_data.logical_plan = fn_data.translator->TranspilePlanMessage(*(fn_data.sys_plan->duck_plan));
+
+      // Convert engine plan to execution plan
+      fn_data.plan_data->plan = fn_data.translator->TranslateLogicalPlan(*(fn_data.logical_plan), false);
+
+      // Initialize a plan executor
+      fn_data.executor = make_uniq<DuckDBExecutor>(context, *(fn_data.plan_data));
     }
+
+    if (!fn_data.result) { fn_data.result = fn_data.executor->Execute(); }
 
     auto result_chunk = fn_data.result->Fetch();
     if (result_chunk) { output.Move(*result_chunk); }
