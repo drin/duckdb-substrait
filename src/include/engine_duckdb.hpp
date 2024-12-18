@@ -66,17 +66,24 @@
 // ------------------------------
 // Convenience aliases
 
-namespace skysubstrait = skytether::substrait;
-namespace skymohair    = skytether::mohair;
+namespace duckdb {
 
-using duckdb::unique_ptr;
-using std::string;
+  // namespace aliases
+  namespace skysubstrait = skyproto::substrait;
+  namespace skymohair    = skyproto::mohair;
 
-using FunctionRenameMap = std::unordered_map<string, string>;
+  // standard type aliases
+  using std::string;
 
-using DuckSystemPlan    = mohair::SystemPlan<duckdb::Relation>;
-using DuckLogicalPlan   = mohair::SystemPlan<duckdb::LogicalOperator>;
-using DuckPhysicalPlan  = mohair::SystemPlan<duckdb::PhysicalOperator>;
+  // duckdb type aliases
+  using duckdb::unique_ptr;
+  using duckdb::shared_ptr;
+
+  // internal type aliases
+  using mohair::DuckSystemPlan;
+
+} // namespace: duckdb
+
 
 
 // ------------------------------
@@ -106,25 +113,38 @@ namespace duckdb {
 
   // Forward declaration to keep TableFunctionData types visible
   struct DuckDBTranslator;
+  struct DuckDBExecutor;
 
   struct FnDataSubstraitTranslation : public TableFunctionData {
     FnDataSubstraitTranslation() = default;
 
-    unique_ptr<DuckDBTranslator>      translator;
-    shared_ptr<DuckSystemPlan>        sys_plan;
-    shared_ptr<DuckLogicalPlan>       engine_plan;
-    shared_ptr<DuckPhysicalPlan>      exec_plan;
+    unique_ptr<DuckDBTranslator> translator;
+    shared_ptr<DuckSystemPlan>   sys_plan;
+    unique_ptr<LogicalOperator>  logical_plan;
+    unique_ptr<PhysicalOperator> physical_plan;
 
-    bool                              enable_optimizer;
-    bool                              finished { false };
+    bool enable_optimizer;
+    bool finished { false };
   };
 
+
+  /**
+   * A TableFunctionData structure to hold all of the state we need for execution.
+   *
+   * We need a PreparedStatementData to construct a PhysicalResultCollector, and we need
+   * the physical plan to control partial execution. If we don't do partial execution or
+   * we simplify pushback, it's possible to just use `duckdb::Relation::Execute()`.
+   */
+  // Used to construct PhysicalResultCollector
   struct FnDataSubstraitExecution : public TableFunctionData {
     FnDataSubstraitExecution() = default;
 
-    unique_ptr<DuckDBTranslator> translator;
-    unique_ptr<DuckSystemPlan>   sys_plan;
-    unique_ptr<QueryResult>      result;
+    unique_ptr<DuckDBTranslator>      translator;
+    shared_ptr<DuckSystemPlan>        sys_plan;
+    unique_ptr<LogicalOperator>       logical_plan;
+    shared_ptr<PreparedStatementData> plan_data;
+    unique_ptr<DuckDBExecutor>        executor;
+    unique_ptr<QueryResult>           result;
   };
 
 } // namespace: duckdb
@@ -147,11 +167,10 @@ namespace duckdb {
     unique_ptr<DuckSystemPlan>   TranslatePlanJson(const string& json_msg);
 
     //! Transforms DuckDB Relation to DuckDB Logical Operator
-    shared_ptr<DuckLogicalPlan>  TranspilePlanMessage(shared_ptr<DuckSystemPlan> sys_plan);
+    unique_ptr<LogicalOperator>  TranspilePlanMessage(Relation& plan_rel);
 
     //! Transforms DuckDB Logical Operator to DuckDB Physical Operator
-    shared_ptr<DuckPhysicalPlan> TranslateLogicalPlan( shared_ptr<DuckLogicalPlan> engine_plan
-                                                      ,bool                        optimize);
+    unique_ptr<PhysicalOperator> TranslateLogicalPlan(LogicalOperator& logical_plan, bool optimize);
 
     private:
       ClientContext&                           context;
