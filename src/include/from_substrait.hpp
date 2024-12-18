@@ -10,11 +10,11 @@
 
 #include <string>
 #include <unordered_map>
-#include "skytether/substrait/plan.pb.h"
+#include "skyproto/substrait/plan.pb.h"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/common/shared_ptr.hpp"
 
-namespace skysubstrait = skytether::substrait;
+namespace skysubstrait = skyproto::substrait;
 
 
 namespace duckdb {

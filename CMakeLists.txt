@@ -34,47 +34,36 @@ if(APPLE)
   set(suffix_sharedlib ".dylib")
 endif()
 
-# |> library for mohair-substrait
+# |> library for mohair
 
 # check for shared library first
-find_library(MohairSubstrait_LIBRARIES "libmohair-substrait${suffix_sharedlib}")
+find_library(Mohair_LIBRARIES "libmohair${suffix_sharedlib}")
 
-if(${MohairSubstrait_LIBRARIES} STREQUAL "MohairSubstrait_LIBRARIES-NOTFOUND")
-
-  # otherwise, check for static library
-  message(STATUS "Searching for mohair-substrait static libraries")
-  find_library(MohairSubstrait_LIBRARIES libmohair-substrait.a REQUIRED)
-
-  if(${MohairSubstrait_LIBRARIES} STREQUAL "MohairSubstrait_LIBRARIES-NOTFOUND")
-    message(FATAL_ERROR "Could not find mohair-substrait")
-
-  else()
-    message(STATUS "Found mohair-substrait static libraries: " ${MohairSubstrait_LIBRARIES})
-
-  endif()
+if(${Mohair_LIBRARIES} STREQUAL "Mohair_LIBRARIES-NOTFOUND")
+  message(FATAL_ERROR "Could not find mohair")
 
 else()
-  message(STATUS "Found mohair-substrait shared libraries: " ${MohairSubstrait_LIBRARIES})
+  message(STATUS "Found mohair: " ${Mohair_LIBRARIES})
 
 endif()
 
-# headers for mohair-substrait
-find_path(MohairSubstrait_INCLUDE_DIRS mohair-substrait REQUIRED)
+# headers for mohair
+find_path(Mohair_INCLUDE_DIRS skytether REQUIRED)
 
-if(${MohairSubstrait_INCLUDE_DIRS} STREQUAL "MohairSubstrait_INCLUDE_DIRS-NOTFOUND")
-  message(FATAL_ERROR "Could not find mohair-substrait include dir")
+if(${Mohair_INCLUDE_DIRS} STREQUAL "Mohair_INCLUDE_DIRS-NOTFOUND")
+  message(FATAL_ERROR "Could not find mohair include dir")
 
 else()
-  message(STATUS "Found mohair-substrait headers: " ${MohairSubstrait_INCLUDE_DIRS})
+  message(STATUS "Found mohair headers: " ${Mohair_INCLUDE_DIRS})
 
 endif()
 
 # We set these to look like what we want a FindPackage to eventually publish
-set(MohairSubstrait::libmohair-substrait ${MohairSubstrait_LIBRARIES})
+set(Mohair::libmohair ${Mohair_LIBRARIES})
 
 # NOTE: this breaks our hack for `build_loadable_extension`
-# list(APPEND MohairSubstrait_INCLUDE_DIRS
-#   ${MohairSubstrait_INCLUDE_DIRS}/mohair-substrait)
+# list(APPEND Mohair_INCLUDE_DIRS
+#   ${Mohair_INCLUDE_DIRS}/mohair)
 
 
 # ------------------------------
@@ -113,11 +102,11 @@ set(EXTENSION_SOURCES
 add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
 
 target_include_directories(${EXTENSION_NAME}
-                           PRIVATE ${MohairSubstrait_INCLUDE_DIRS}
-                                   ${MohairSubstrait_INCLUDE_DIRS}/mohair-substrait)
+                           PRIVATE ${Mohair_INCLUDE_DIRS}
+                                   ${Mohair_INCLUDE_DIRS}/skytether)
 
 target_link_libraries(${EXTENSION_NAME}
-                      PRIVATE ${MohairSubstrait_LIBRARIES}
+                      PRIVATE ${Mohair_LIBRARIES}
                               ${Protobuf_LIBRARIES})
 
 if (Protobuf_VERSION VERSION_GREATER_EQUAL 4)
@@ -135,8 +124,8 @@ set(PARAMETERS "-warnings")
 build_loadable_extension(${EXT_BASENAME}
   ${PARAMETERS}
   ${EXTENSION_SOURCES}
-  "-I${MohairSubstrait_INCLUDE_DIRS}"
-  "-I${MohairSubstrait_INCLUDE_DIRS}/mohair-substrait")
+  "-I${Mohair_INCLUDE_DIRS}"
+  "-I${Mohair_INCLUDE_DIRS}/skytether")
 
 
 # ------------------------------

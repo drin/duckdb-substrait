@@ -12,7 +12,7 @@
 #pragma once
 
 #include <unordered_map>
-#include "skytether/substrait/type.pb.h"
+#include "skyproto/substrait/type.pb.h"
 
 #include "duckdb/common/types/hash.hpp"
 
@@ -20,7 +20,7 @@
 // ------------------------------
 // Aliases
 
-namespace skysubstrait = skytether::substrait;
+namespace skysubstrait = skyproto::substrait;
 
 
 // ------------------------------

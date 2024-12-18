@@ -28,28 +28,36 @@
 
 #include "duckdb.hpp"
 
-#include "skytether/substrait/plan.pb.h"
-#include "skytether/substrait/algebra.pb.h"
-#include "skytether/mohair/algebra.pb.h"
+#include "skyproto/substrait/plan.pb.h"
+#include "skyproto/substrait/algebra.pb.h"
+#include "skyproto/mohair/algebra.pb.h"
 
 
 // ------------------------------
 // Macros and Type Aliases
 
-namespace skysubstrait = skytether::substrait;
-namespace skymohair    = skytether::mohair;
+namespace mohair {
 
-// Standard types
-using std::string;
-using std::unordered_map;
+  // Namespace aliases
+  namespace skysubstrait = skyproto::substrait;
+  namespace skymohair    = skyproto::mohair;
 
-// types and functions from duckdb namespace
-using duckdb::unique_ptr;
-using duckdb::shared_ptr;
+  // Standard types
+  using std::string;
+  using std::unordered_map;
 
-// types and functions from protobuf
-using ProtoStatus = absl::Status;
-using google::protobuf::util::JsonStringToMessage;
+  // types and functions from duckdb namespace
+  template <typename ptype>
+  using duck_uptr = duckdb::unique_ptr<ptype>;
+
+  template <typename ptype>
+  using duck_sptr = duckdb::shared_ptr<ptype>;
+
+  // types and functions from protobuf
+  using ProtoStatus = absl::Status;
+  using google::protobuf::util::JsonStringToMessage;
+
+} // namespace: mohair
 
 
 // ------------------------------
@@ -57,47 +65,7 @@ using google::protobuf::util::JsonStringToMessage;
 
 namespace mohair {
 
-  //! Alias template for transpilation functions
-  template <typename LogicalOpType>
-  using TranspileSysPlanFnType = std::function<skysubstrait::Plan(LogicalOpType&)>;
-
-  template <typename LogicalOpType>
-  using TranspileSubPlanFnType = std::function<LogicalOpType(skysubstrait::Plan&)>;
-
-  //! Templated class to hold a substrait plan and a "system plan".
-  /** The system plan is flexibly represented by the templated type so that any particular
-   *  system can translate to the preferred level of abstraction.
-   */
-  template <typename LogicalOpType>
-  struct SystemPlan {
-    //! A system-level query plan represented as substrait
-    shared_ptr<skysubstrait::Plan> substrait;
-
-    //! A system-level query plan represented by a specific query engine
-    shared_ptr<LogicalOpType> engine;
-
-
-    SystemPlan( shared_ptr<skysubstrait::Plan> s_plan
-               ,shared_ptr<LogicalOpType>      e_plan)
-      :  substrait(s_plan), engine(e_plan) {}
-
-
-    // TODO:
-    // arrow::Table Execute();
-  };
-
-  //! Builder function that constructs SystemPlan from a serialized substrait message
-  unique_ptr<skysubstrait::Plan> SubstraitPlanFromSubstraitMessage(const string& serialized_msg);
-
-  //! Builder function that constructs SystemPlan from a JSON-formatted substrait message
-  unique_ptr<skysubstrait::Plan> SubstraitPlanFromSubstraitJson(const string& json_msg);
-
-} // namespace: mohair
-
-
-// >> Code for managing substrait function extensions. Likely to move in the future.
-namespace mohair {
-
+  //! Code for managing substrait function extensions. Likely to move in the future.
   struct SubstraitFunctionMap {
     //! Registry of substrait function extensions used in substrait plan
     unordered_map<uint64_t, string> fn_map;
@@ -105,5 +73,26 @@ namespace mohair {
     void   RegisterExtensionFunctions(skysubstrait::Plan& plan);
     string FindExtensionFunction(uint64_t id);
   };
+
+  //! A structure holding a substrait plan and an appropriate representation for DuckDB.
+  struct DuckSystemPlan {
+    //! A system-level query plan represented as substrait
+    duck_sptr<skysubstrait::Plan> substrait;
+
+    //! The DuckDB representation of the substrait plan
+    duck_sptr<duckdb::Relation> duck_plan;
+
+    DuckSystemPlan( duck_sptr<skysubstrait::Plan> s_plan
+                   ,duck_sptr<duckdb::Relation>   e_plan)
+      : substrait(s_plan), duck_plan(e_plan) {}
+  };
+
+  //! Builder function that constructs DuckSystemPlan from a serialized substrait message
+  duck_uptr<skysubstrait::Plan>
+  SubstraitPlanFromSubstraitMessage(const string& serialized_msg);
+
+  //! Builder function that constructs DuckSystemPlan from a JSON-formatted substrait message
+  duck_uptr<skysubstrait::Plan>
+  SubstraitPlanFromSubstraitJson(const string& json_msg);
 
 } // namespace: mohair

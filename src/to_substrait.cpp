@@ -14,12 +14,12 @@
 #include "duckdb/catalog/catalog_entry/duck_table_entry.hpp"
 #include "duckdb/planner/operator/logical_set_operation.hpp"
 #include "google/protobuf/util/json_util.h"
-#include "skytether/substrait/algebra.pb.h"
-#include "skytether/substrait/plan.pb.h"
+#include "skyproto/substrait/algebra.pb.h"
+#include "skyproto/substrait/plan.pb.h"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/execution/index/art/art_key.hpp"
 
-namespace skysubstrait = skytether::substrait;
+namespace skysubstrait = skyproto::substrait;
 
 namespace duckdb {
 const std::unordered_map<std::string, std::string> DuckDBToSubstrait::function_names_remap = {

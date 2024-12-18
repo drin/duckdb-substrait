@@ -25,7 +25,7 @@
 // ------------------------------
 // Macros and Type Aliases
 
-namespace skysubstrait = skytether::substrait;
+namespace skysubstrait = skyproto::substrait;
 
 
 // ------------------------------
@@ -61,7 +61,7 @@ namespace mohair {
   // Builder Functions for SystemPlan
 
   //! Builder function that constructs SystemPlan from a serialized substrait message
-  unique_ptr<skysubstrait::Plan>
+  duck_uptr<skysubstrait::Plan>
   SubstraitPlanFromSubstraitMessage(const string& serialized_msg) {
     auto plan = duckdb::make_uniq<skysubstrait::Plan>();
     if (not plan->ParseFromString(serialized_msg)) {
@@ -72,7 +72,7 @@ namespace mohair {
   }
 
   //! Builder function that constructs SystemPlan from a JSON-formatted substrait message
-  unique_ptr<skysubstrait::Plan>
+  duck_uptr<skysubstrait::Plan>
   SubstraitPlanFromSubstraitJson(const string& json_msg) {
     auto plan = duckdb::make_uniq<skysubstrait::Plan>();
 

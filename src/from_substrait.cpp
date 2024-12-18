@@ -16,7 +16,7 @@
 
 #include "duckdb/main/client_data.hpp"
 #include "google/protobuf/util/json_util.h"
-#include "skytether/substrait/plan.pb.h"
+#include "skyproto/substrait/plan.pb.h"
 
 #include "duckdb/main/table_description.hpp"
 
@@ -39,7 +39,7 @@
 #include "duckdb/main/relation/projection_relation.hpp"
 #include "duckdb/main/relation/setop_relation.hpp"
 
-namespace skysubstrait = skytether::substrait;
+namespace skysubstrait = skyproto::substrait;
 
 namespace duckdb {
 const std::unordered_map<std::string, std::string> SubstraitToDuckDB::function_names_remap = {
