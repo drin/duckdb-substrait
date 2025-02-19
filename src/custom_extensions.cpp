@@ -9,19 +9,19 @@ namespace duckdb {
 
 // FIXME: This cannot be the best way of getting string names of the types
 string TransformTypes(const skysubstrait::Type &type) {
-	auto str = type.DebugString();
-	string str_type;
-	for (auto &c : str) {
-		if (c == ' ') {
-			return str_type;
-		}
-		str_type += c;
-	}
-	return str_type;
+  auto str = type.DebugString();
+  string str_type;
+  for (auto &c : str) {
+    if (c == ' ') {
+      return str_type;
+    }
+    str_type += c;
+  }
+  return str_type;
 }
 
 vector<string> GetAllTypes() {
-	return {
+  return {
      "bool"
     ,"i8",  "i16", "i32", "i64", "fp32", "fp64"
     ,"string", "binary"
@@ -110,111 +110,108 @@ void SubstraitCustomFunctions::InsertFunctionExtension( string         name_p
                                                        ,vector<string> types_p
                                                        ,string         file_path) {
   // A vector of param types as specified by config
-	auto cfg_param_types = std::move(types_p);
+  auto cfg_param_types = std::move(types_p);
 
   // A vector of actual param types (after expansion)
-	vector<vector<string>> fn_param_types;
-	for (auto &param_type : cfg_param_types) {
+  vector<vector<string>> fn_param_types;
+  for (auto &param_type : cfg_param_types) {
     // Expand an `any` type to all possible parameter types
-		if (IsAnyParamType(param_type)) { fn_param_types.emplace_back(GetAllTypes()); }
+    if (IsAnyParamType(param_type)) { fn_param_types.emplace_back(GetAllTypes()); }
 
     // Push the specified param type only (single-element vector)
     else { fn_param_types.push_back({param_type}); }
-	}
+  }
 
-	// Get the number of dimensions
-	idx_t count_params = fn_param_types.size();
+  // Get the number of dimensions
+  idx_t count_params = fn_param_types.size();
 
   // A vector of integers that represents a counter of function signatures. Whenever a
   // signature is inserted into the custom function maps, `fn_sig_idx` is incremented.
   // For example, { 2, 0 }, a two parameter signature that we have inserted two of:
   // { 0, 0 } and { 1, 0 }
-	vector<idx_t> fn_sig_idx(count_params, 0);
+  vector<idx_t> fn_sig_idx(count_params, 0);
 
-	// Call the helper function with initial depth 0
-	InsertAllFunctions(fn_param_types, fn_sig_idx, 0, name_p, file_path);
+  // Call the helper function with initial depth 0
+  InsertAllFunctions(fn_param_types, fn_sig_idx, 0, name_p, file_path);
 }
 
 string SubstraitCustomFunction::GetName() {
-	if (arg_types.empty()) {
-		return name;
-	}
-	string function_signature = name + ":";
-	for (auto &type : arg_types) {
-		function_signature += type + "_";
-	}
-	function_signature.pop_back();
-	return function_signature;
+  if (arg_types.empty()) {
+    return name;
+  }
+  string function_signature = name + ":";
+  for (auto &type : arg_types) {
+    function_signature += type + "_";
+  }
+  function_signature.pop_back();
+  return function_signature;
 }
 
 string SubstraitFunctionExtensions::GetExtensionURI() const {
-	if (IsNative()) {
-		return "";
-	}
-	return "https://github.com/substrait-io/substrait/blob/main/extensions/" + extension_path;
+  if (IsNative()) {
+    return "";
+  }
+  return "https://github.com/substrait-io/substrait/blob/main/extensions/" + extension_path;
 }
 
 bool SubstraitFunctionExtensions::IsNative() const {
-	return extension_path == "native";
+  return extension_path == "native";
 }
 
 SubstraitCustomFunctions::SubstraitCustomFunctions() { Initialize(); }
 
 vector<string> SubstraitCustomFunctions::GetTypes(const vector<skysubstrait::Type> &types) {
-	vector<string> transformed_types;
-	for (auto &type : types) {
-		transformed_types.emplace_back(TransformTypes(type));
-	}
-	return transformed_types;
+  vector<string> transformed_types;
+  for (auto &type : types) {
+    transformed_types.emplace_back(TransformTypes(type));
+  }
+  return transformed_types;
 }
 
 // FIXME: We might have to do DuckDB extensions at some point
 SubstraitFunctionExtensions SubstraitCustomFunctions::Get(const string &name,
                                                           const vector<skysubstrait::Type> &types) const {
-	vector<string> transformed_types;
-	if (types.empty()) {
-		SubstraitCustomFunction custom_function {name, {}};
-		auto it = any_arg_functions.find(custom_function);
-		if (it != custom_functions.end()) {
-			// We found it in our substrait custom map, return that
-			return it->second;
-		}
-		return {{name, {}}, "native"};
-	}
+  vector<string> transformed_types;
+  if (types.empty()) {
+    SubstraitCustomFunction custom_function { name, {} };
+    auto it = any_arg_functions.find(custom_function);
 
-	for (auto &type : types) {
-		transformed_types.emplace_back(TransformTypes(type));
-		if (transformed_types.back().empty()) {
-			// If it is empty it means we did not find a yaml extension, we return the function name
-			return {{name, {}}, "native"};
-		}
-	}
-	{
-		SubstraitCustomFunction custom_function {name, {transformed_types}};
-		auto it = custom_functions.find(custom_function);
-		if (it != custom_functions.end()) {
-			// We found it in our substrait custom map, return that
-			return it->second;
-		}
-	}
+    // If we matched something in our substrait custom map, return that
+    if (it != custom_functions.end()) { return it->second; }
+    return { { name, {} }, "native" };
+  }
 
-	// check if it's a many argument fit
-	bool possibly_many_arg = true;
-	string type = transformed_types[0];
-	for (auto &t : transformed_types) {
-		possibly_many_arg = possibly_many_arg && type == t;
-	}
-	if (possibly_many_arg) {
-		type += '?';
-		SubstraitCustomFunction custom_many_function {name, {{type}}};
-		auto many_it = many_arg_functions.find(custom_many_function);
-		if (many_it != many_arg_functions.end()) {
-			return many_it->second;
-		}
-	}
-	// TODO: check if this should also print the arg types or not
-	// we did not find it, return it as a native substrait function
-	return {{name, {}}, "native"};
+  for (auto &type : types) {
+    transformed_types.emplace_back(TransformTypes(type));
+
+    // If empty, then we did not find a yaml extension
+    if (transformed_types.back().empty()) { return { { name, {} }, "native"}; }
+  }
+
+  {
+    SubstraitCustomFunction custom_function { name, {transformed_types} };
+    auto it = custom_functions.find(custom_function);
+    if (it != custom_functions.end()) { return it->second; }
+  }
+
+  // check if it's a many argument fit
+  bool possibly_many_arg = true;
+  string type = transformed_types[0];
+  for (auto& t : transformed_types) {
+    possibly_many_arg &= type == t;
+  }
+
+  if (possibly_many_arg) {
+    type += '?';
+    SubstraitCustomFunction custom_many_function {name, {{type}}};
+    auto many_it = many_arg_functions.find(custom_many_function);
+
+    if (many_it != many_arg_functions.end()) { return many_it->second; }
+  }
+
+  // TODO: check if this should also print the arg types or not
+  // we did not find it, return it as a native substrait function
+  return {{name, {}}, "native"};
 }
 
 } // namespace duckdb
