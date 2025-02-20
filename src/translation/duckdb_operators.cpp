@@ -401,18 +401,32 @@ namespace duckdb {
     vector<Value> slice_names;
     string table_name { sky_rel.domain() + "/" + sky_rel.partition() };
 
-    // In this case, we iterate over slices() to get slice indices
-    if (not sky_rel.slices().empty()) {
-      for (int slice_id = 0; slice_id < sky_rel.slices_size(); ++slice_id) {
-        slice_names.emplace_back(table_name + "-" + std::to_string(sky_rel.slices(slice_id)));
+    // In this case, we iterate over intervals in slice_selection() to get slice indices
+    if (not sky_rel.slice_selection().empty()) {
+      // NOTE: indx is "interval index"
+      for (int indx = 0; indx < sky_rel.slice_selection_size(); ++indx) {
+        const auto& slice_sel = sky_rel.slice_selection(indx);
+        if (slice_sel.has_interval()) {
+          uint64_t slice_id = slice_sel.interval().start();
+          for (; slice_id < slice_sel.interval().end(); ++slice_id) {
+            slice_names.emplace_back(table_name + "-" + std::to_string(slice_id));
+          }
+        }
+
+        // Initialize the name for each slice in the list (should be sparse)
+        else if (slice_sel.has_list()) {
+          for (uint64_t slice_id : slice_sel.list().indices()) {
+            slice_names.emplace_back(table_name + "-" + std::to_string(slice_id));
+          }
+        }
       }
     }
 
     // In this case, we generate slice indices up to the last index
-    // NOTE: hardcoded for now due to lazyness
     else {
-      for (uint32_t slice_ndx = 0; slice_ndx < 10; ++slice_ndx) {
-        slice_names.emplace_back(table_name + "-" + std::to_string(slice_ndx));
+      // NOTE: hardcoded for now due to lazyness
+      for (uint32_t slice_id = 0; slice_id < 10; ++slice_id) {
+        slice_names.emplace_back(table_name + "-" + std::to_string(slice_id));
       }
     }
 
