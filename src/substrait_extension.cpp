@@ -307,7 +307,7 @@ namespace duckdb {
 
 
   // ------------------------------
-  // Supporting functions for Table Function "translate_mohair"
+  // Supporting functions for Table Function "from_substrait"
 
   //! Container for FromSubstraitBind function data
   struct FromSubstraitFunctionData : public TableFunctionData {
@@ -408,10 +408,9 @@ namespace duckdb {
 
     // Prepare a FunctionData instance to return
     auto fn_data = make_uniq<FnDataSubstraitTranslation>();
-    fn_data->translator = make_uniq<DuckDBTranslator>(context);
-    fn_data->sys_plan   = fn_data->translator->TranslatePlanMessage(plan_msg);
-    fn_data->plan_data  = std::make_shared<PreparedStatementData>(StatementType::SELECT_STATEMENT);
-
+    fn_data->translator       = make_uniq<DuckDBTranslator>(context);
+    fn_data->sys_plan         = fn_data->translator->TranslatePlanMessage(plan_msg);
+    fn_data->plan_data        = std::make_shared<PreparedStatementData>(StatementType::SELECT_STATEMENT);
     fn_data->enable_optimizer = GetOptimizationOption(context.config, input.named_parameters);
 
     // For us to further build PreparedStatementData
