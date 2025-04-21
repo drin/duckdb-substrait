@@ -1,9 +1,11 @@
 [submodule "duckdb"]
 	path = duckdb
 	url = https://github.com/drin/duckdb
+	branch = coop-decomp
 [submodule "substrait"]
 	path = substrait
 	url = https://github.com/drin/substrait
+	branch = mohair
 [submodule "extension-ci-tools"]
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools.git
