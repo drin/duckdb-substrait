@@ -16,8 +16,8 @@
 #include "duckdb/planner/joinside.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/table_filter.hpp"
-#include "substrait/algebra.pb.h"
-#include "substrait/plan.pb.h"
+#include "mohair-substrait/substrait/algebra.pb.h"
+#include "mohair-substrait/substrait/plan.pb.h"
 #include <string>
 #include <unordered_map>
 
@@ -40,7 +40,7 @@ private:
 	//! Transform DuckDB Plan to Substrait Plan
 	void TransformPlan(LogicalOperator &dop);
 	//! Registers a function
-	uint64_t RegisterFunction(const std::string &name, vector<::substrait::Type> &args_types);
+	uint64_t RegisterFunction(const std::string &name, vector<substrait::Type> &args_types);
 	//! Creates a reference to a table column
 	static void CreateFieldRef(substrait::Expression *expr, uint64_t col_idx);
 	//! In case of struct types we might we do DFS to get all names

@@ -76,11 +76,12 @@ namespace duckdb {
   static duckdb::JoinType 
   TranslateJoinType(const substrait::JoinRel& sjoin) {
     switch (sjoin.type()) {
-      case substrait::JoinRel::JOIN_TYPE_INNER:  return duckdb::JoinType::INNER;
-      case substrait::JoinRel::JOIN_TYPE_LEFT:   return duckdb::JoinType::LEFT;
-      case substrait::JoinRel::JOIN_TYPE_RIGHT:  return duckdb::JoinType::RIGHT;
-      case substrait::JoinRel::JOIN_TYPE_SINGLE: return duckdb::JoinType::SINGLE;
-      case substrait::JoinRel::JOIN_TYPE_SEMI:   return duckdb::JoinType::SEMI;
+      case substrait::JoinRel::JOIN_TYPE_INNER      : return duckdb::JoinType::INNER;
+      case substrait::JoinRel::JOIN_TYPE_LEFT       : return duckdb::JoinType::LEFT;
+      case substrait::JoinRel::JOIN_TYPE_RIGHT      : return duckdb::JoinType::RIGHT;
+      case substrait::JoinRel::JOIN_TYPE_LEFT_SINGLE: return duckdb::JoinType::SINGLE;
+      case substrait::JoinRel::JOIN_TYPE_LEFT_SEMI  : return duckdb::JoinType::SEMI;
+      case substrait::JoinRel::JOIN_TYPE_OUTER      : return duckdb::JoinType::OUTER;
 
       default:
         throw InternalException("Unsupported join type");
@@ -126,7 +127,7 @@ namespace duckdb {
     JoinType djointype = TranslateJoinType(sjoin);
     unique_ptr<ParsedExpression> join_condition = TranslateExpr(sjoin.expression());
 
-    return make_shared<JoinRelation>(
+    return make_shared_ptr<JoinRelation>(
        TranslateOp(sjoin.left())->Alias("left")
       ,TranslateOp(sjoin.right())->Alias("right")
       ,std::move(join_condition)
@@ -136,7 +137,7 @@ namespace duckdb {
 
   shared_ptr<Relation>
   DuckDBTranslator::TranslateCrossProductOp(const substrait::CrossRel& scross) {
-    return make_shared<CrossProductRelation>(
+    return make_shared_ptr<CrossProductRelation>(
        TranslateOp(scross.left())->Alias("left")
       ,TranslateOp(scross.right())->Alias("right")
     );
@@ -144,7 +145,7 @@ namespace duckdb {
 
   shared_ptr<Relation>
   DuckDBTranslator::TranslateFetchOp(const substrait::FetchRel& slimit) {
-    return make_shared<LimitRelation>(
+    return make_shared_ptr<LimitRelation>(
        TranslateOp(slimit.input())
       ,slimit.count()
       ,slimit.offset()
@@ -153,7 +154,7 @@ namespace duckdb {
 
   shared_ptr<Relation>
   DuckDBTranslator::TranslateFilterOp(const substrait::FilterRel& sfilter) {
-    return make_shared<FilterRelation>(
+    return make_shared_ptr<FilterRelation>(
        TranslateOp(sfilter.input())
       ,TranslateExpr(sfilter.condition())
     );
@@ -171,7 +172,7 @@ namespace duckdb {
       mock_aliases.push_back("expr_" + to_string(i));
     }
 
-    return make_shared<ProjectionRelation>(
+    return make_shared_ptr<ProjectionRelation>(
        TranslateOp(sproj.input())
       ,std::move(expressions)
       ,std::move(mock_aliases)
@@ -209,7 +210,7 @@ namespace duckdb {
       );
     }
 
-    return make_shared<AggregateRelation>(
+    return make_shared_ptr<AggregateRelation>(
        TranslateOp(saggr.input())
       ,std::move(expressions)
       ,std::move(groups)
@@ -323,7 +324,7 @@ namespace duckdb {
 
     // Filter predicate for scan operation
     if (sget.has_filter()) {
-      scan = make_shared<FilterRelation>(std::move(scan), TranslateExpr(sget.filter()));
+      scan = make_shared_ptr<FilterRelation>(std::move(scan), TranslateExpr(sget.filter()));
     }
 
     // Projection predicate for scan operation
@@ -342,7 +343,7 @@ namespace duckdb {
         );
       }
 
-      scan = make_shared<ProjectionRelation>(
+      scan = make_shared_ptr<ProjectionRelation>(
         std::move(scan), std::move(expressions), std::move(aliases)
       );
     }
@@ -358,7 +359,7 @@ namespace duckdb {
       order_nodes.push_back(TranslateOrder(sordf));
     }
 
-    return make_shared<OrderRelation>(TranslateOp(ssort.input()), std::move(order_nodes));
+    return make_shared_ptr<OrderRelation>(TranslateOp(ssort.input()), std::move(order_nodes));
   }
 
 
@@ -377,7 +378,7 @@ namespace duckdb {
 
     auto lhs = TranslateOp(inputs[0]);
     auto rhs = TranslateOp(inputs[1]);
-    return make_shared<SetOpRelation>(std::move(lhs), std::move(rhs), type);
+    return make_shared_ptr<SetOpRelation>(std::move(lhs), std::move(rhs), type);
   }
 
 
@@ -414,7 +415,7 @@ namespace duckdb {
       expressions.push_back(make_uniq<PositionalReferenceExpression>(id++));
     }
 
-    return make_shared<ProjectionRelation>(
+    return make_shared_ptr<ProjectionRelation>(
       TranslateOp(sop.input()), std::move(expressions), aliases
     );
   }
