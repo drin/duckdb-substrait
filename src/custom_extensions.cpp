@@ -90,8 +90,8 @@ void SubstraitCustomFunctions::InsertAllFunctions( const vector<vector<string>>&
 void SubstraitCustomFunctions::InsertCustomFunction( string         fn_name
                                                     ,string         ext_fpath
                                                     ,vector<string> param_types) {
-  SubstraitCustomFunction       custom_fn     { name, param_types };
-  SubstraitFunctionExtensions&& custom_fn_ext { custom_fn, std::move(file_path) };
+  SubstraitCustomFunction       custom_fn     { fn_name, param_types };
+  SubstraitFunctionExtensions&& custom_fn_ext { custom_fn, std::move(ext_fpath) };
 
   // If there were no parameters, register a variadic function signature
   if (param_types.empty()) { any_arg_functions[custom_fn] = custom_fn_ext; }
