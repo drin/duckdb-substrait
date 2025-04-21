@@ -1,9 +1,12 @@
 #define DUCKDB_EXTENSION_MAIN
 
+#include <optional>
+
 #include "substrait_extension.hpp"
 #include "from_substrait.hpp"
 #include "to_substrait.hpp"
 #include "plans.hpp"
+#include "engine_duckdb.hpp"
 
 #include "duckdb/execution/column_binding_resolver.hpp"
 #include "duckdb/optimizer/optimizer.hpp"
@@ -11,718 +14,616 @@
 #include "duckdb/planner/planner.hpp"
 
 #ifndef DUCKDB_AMALGAMATION
-#include "duckdb/common/enums/optimizer_type.hpp"
-#include "duckdb/common/shared_ptr.hpp"
-#include "duckdb/function/table_function.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
-#include "duckdb/parser/parsed_data/create_pragma_function_info.hpp"
-#include "duckdb/main/client_context.hpp"
-#include "duckdb/main/config.hpp"
-#include "duckdb/main/connection.hpp"
+  #include "duckdb/common/enums/optimizer_type.hpp"
+  #include "duckdb/common/shared_ptr.hpp"
+  #include "duckdb/function/table_function.hpp"
+  #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
+  #include "duckdb/parser/parsed_data/create_pragma_function_info.hpp"
+  #include "duckdb/main/client_context.hpp"
+  #include "duckdb/main/config.hpp"
+  #include "duckdb/main/connection.hpp"
 #endif
 
 namespace duckdb {
 
-//! This is a no-op deleter for creating a shared pointer to a reference.
-void deleter_noop(ClientContext *) {}
+  //! This is a no-op deleter for creating a shared pointer to a reference.
+  void deleter_noop(ClientContext *) {}
 
-struct ToSubstraitFunctionData : public TableFunctionData {
+    //! Container for bound data received from `ToSubstrait` Table Function
+  struct ToSubstraitFunctionData : public TableFunctionData {
 
-  ToSubstraitFunctionData() = default;
+    ToSubstraitFunctionData() = default;
 
-  string query;
-  bool   enable_optimizer { false };
+    string query;
+    bool   enable_optimizer;
+    bool   strict   { false }; // fail the conversion on possible warnings
+    bool   finished { false };
 
-  //! We will fail the conversion on possible warnings
-  bool   strict   { false };
-  bool   finished { false };
+    //! Original options from the connection
+    ClientConfig original_config;
+    set<OptimizerType> original_disabled_optimizers;
 
-  //! Original options from the connection
-  ClientConfig original_config;
-  set<OptimizerType> original_disabled_optimizers;
+    // Setup configurations
+    void PrepareConnection(ClientContext &context) {
+      // First collect original options
+      original_config = context.config;
+      original_disabled_optimizers = DBConfig::GetConfig(context).options.disabled_optimizers;
 
-  // Setup configurations
-  void PrepareConnection(ClientContext &context) {
-    // First collect original options
-    original_config = context.config;
-    original_disabled_optimizers = DBConfig::GetConfig(context).options.disabled_optimizers;
+      // The user might want to disable the optimizer of the new connection
+      context.config.enable_optimizer = enable_optimizer;
+      context.config.use_replacement_scans = false;
 
-    // The user might want to disable the optimizer of the new connection
-    context.config.enable_optimizer = enable_optimizer;
-    context.config.use_replacement_scans = false;
+      // We want for sure to disable the internal compression optimizations.
+      // These are DuckDB specific, no other system implements these. Also,
+      // respect the user's settings if they chose to disable any specific optimizers.
+      //
+      // The InClauseRewriter optimization converts large `IN` clauses to a
+      // "mark join" against a `ColumnDataCollection`, which may not make
+      // sense in other systems and would complicate the conversion to Substrait.
+      set<OptimizerType> disabled_optimizers = DBConfig::GetConfig(context).options.disabled_optimizers;
+      disabled_optimizers.insert(OptimizerType::IN_CLAUSE);
+      disabled_optimizers.insert(OptimizerType::COMPRESSED_MATERIALIZATION);
+      disabled_optimizers.insert(OptimizerType::MATERIALIZED_CTE);
 
-    // We want for sure to disable the internal compression optimizations.
-    // These are DuckDB specific, no other system implements these. Also,
-    // respect the user's settings if they chose to disable any specific optimizers.
-    //
-    // The InClauseRewriter optimization converts large `IN` clauses to a
-    // "mark join" against a `ColumnDataCollection`, which may not make
-    // sense in other systems and would complicate the conversion to Substrait.
-    set<OptimizerType> disabled_optimizers = DBConfig::GetConfig(context).options.disabled_optimizers;
-    disabled_optimizers.insert(OptimizerType::IN_CLAUSE);
-    disabled_optimizers.insert(OptimizerType::COMPRESSED_MATERIALIZATION);
-    disabled_optimizers.insert(OptimizerType::MATERIALIZED_CTE);
+      // If error(varchar) gets implemented in substrait this can be removed
+      context.config.scalar_subquery_error_on_multiple_rows = false;
 
-    // If error(varchar) gets implemented in substrait this can be removed
-    context.config.scalar_subquery_error_on_multiple_rows = false;
+      DBConfig::GetConfig(context).options.disabled_optimizers = disabled_optimizers;
+    }
 
-    DBConfig::GetConfig(context).options.disabled_optimizers = disabled_optimizers;
-  }
+    unique_ptr<LogicalOperator> ExtractPlan(ClientContext &context) {
+      PrepareConnection(context);
+      unique_ptr<LogicalOperator> plan;
+      try {
+        Parser parser(context.GetParserOptions());
+        parser.ParseQuery(query);
 
-  unique_ptr<LogicalOperator> ExtractPlan(ClientContext &context) {
-    PrepareConnection(context);
-    unique_ptr<LogicalOperator> plan;
-    try {
-      Parser parser(context.GetParserOptions());
-      parser.ParseQuery(query);
+        Planner planner(context);
+        planner.CreatePlan(std::move(parser.statements[0]));
+        D_ASSERT(planner.plan);
 
-      Planner planner(context);
-      planner.CreatePlan(std::move(parser.statements[0]));
-      D_ASSERT(planner.plan);
+        plan = std::move(planner.plan);
 
-      plan = std::move(planner.plan);
+        if (context.config.enable_optimizer) {
+          Optimizer optimizer(*planner.binder, context);
+          plan = optimizer.Optimize(std::move(plan));
+        }
 
-      if (context.config.enable_optimizer) {
-        Optimizer optimizer(*planner.binder, context);
-        plan = optimizer.Optimize(std::move(plan));
+        ColumnBindingResolver resolver;
+        ColumnBindingResolver::Verify(*plan);
+        resolver.VisitOperator(*plan);
+        plan->ResolveOperatorTypes();
+      } catch (...) {
+        CleanupConnection(context);
+        throw;
       }
 
-      ColumnBindingResolver resolver;
-      ColumnBindingResolver::Verify(*plan);
-      resolver.VisitOperator(*plan);
-      plan->ResolveOperatorTypes();
-    } catch (...) {
       CleanupConnection(context);
-      throw;
+      return plan;
     }
 
-    CleanupConnection(context);
-    return plan;
-  }
+    // Reset configuration
+    void CleanupConnection(ClientContext &context) const {
+      DBConfig::GetConfig(context).options.disabled_optimizers = original_disabled_optimizers;
+      context.config = original_config;
+    }
+  };
 
-  // Reset configuration
-  void CleanupConnection(ClientContext &context) const {
-    DBConfig::GetConfig(context).options.disabled_optimizers = original_disabled_optimizers;
-    context.config = original_config;
-  }
-};
-
-static void SetOptions( ToSubstraitFunctionData&     function
-                       ,const ClientConfig&          config
-                       ,const named_parameter_map_t& named_params) {
-  bool optimizer_option_set = false;
-
-  for (const auto &param : named_params) {
-    auto loption = StringUtil::Lower(param.first);
-    // If the user has explicitly requested to enable/disable the optimizer when
-    // generating Substrait, then that takes precedence.
-    if (loption == "enable_optimizer") {
-      function.enable_optimizer = BooleanValue::Get(param.second);
-      optimizer_option_set      = true;
+  static std::optional<bool>
+  GetOption(const ClientConfig& config, const named_parameter_map_t& named_params, const char* opt_name) {
+    // First, check if the user has explicitly requested to enable/disable the option
+    for (const auto &param : named_params) {
+      auto loption = StringUtil::Lower(param.first);
+      if (loption == opt_name) {
+        return std::optional<bool> { BooleanValue::Get(param.second) };
+      }
     }
 
-    if (loption == "strict") {
-      function.strict = BooleanValue::Get(param.second);
+    // Otherwise, return the default value
+    return std::nullopt;
+  }
+
+  static std::optional<bool>
+  GetOptimizationOption(const ClientConfig& config, const duckdb::named_parameter_map_t& named_params) {
+    auto optimizer_optval = GetOption(config, named_params, "enable_optimizer");
+    return optimizer_optval.value_or(config.enable_optimizer);
+  }
+
+  static unique_ptr<ToSubstraitFunctionData>
+  InitToSubstraitFunctionData(const ClientConfig& config, TableFunctionBindInput& input) {
+    auto result = make_uniq<ToSubstraitFunctionData>();
+
+    result->query            = input.inputs[0].ToString();
+    result->enable_optimizer = GetOptimizationOption(config, input.named_parameters);
+
+    // set 'strict' attribute
+    auto strict_optval = GetOption(config, input.named_parameters, "strict");
+    if (strict_optval.has_value()) { result->strict = strict_opval.value(); }
+
+    return result;
+  }
+
+
+  static unique_ptr<FunctionData>
+  ToSubstraitBind(ClientContext          &context,
+                  TableFunctionBindInput &input,
+                  vector<LogicalType>    &return_types,
+                  vector<string>         &names) {
+    return_types.emplace_back(LogicalType::BLOB);
+    names.emplace_back("Plan Blob");
+    return InitToSubstraitFunctionData(context.config, input);
+  }
+
+  static unique_ptr<FunctionData>
+  ToJsonBind(ClientContext          &context,
+             TableFunctionBindInput &input,
+             vector<LogicalType>    &return_types,
+             vector<string>         &names) {
+    return_types.emplace_back(LogicalType::VARCHAR);
+    names.emplace_back("Json");
+    return InitToSubstraitFunctionData(context.config, input);
+  }
+
+  shared_ptr<Relation>
+  SubstraitPlanToDuckDBRel(shared_ptr<ClientContext> &context,
+                           const string &serialized,
+                           bool json = false,
+                           bool acquire_lock = false) {
+    SubstraitToDuckDB transformer_s2d(context, serialized, json, acquire_lock);
+    return transformer_s2d.TransformPlan();
+  }
+
+  //! This function matches results of substrait plans with direct Duckdb queries
+  //! Is only executed when pragma enable_verification = true
+  //! It creates extra connections to be able to execute the consumed DuckDB Plan
+  //! And the SQL query itself, ideally this wouldn't be necessary and won't
+  //! work for round-tripping tests over temporary objects.
+  static void
+  VerifySubstraitRoundtrip(unique_ptr<LogicalOperator> &query_plan,
+                           ClientContext               &context,
+                           ToSubstraitFunctionData     &data,
+                           const string                &serialized,
+                           bool                         is_json) {
+    // We round-trip the generated json and verify if the result is the same
+    auto duck_conn   = Connection(*context.db);
+    auto duck_result = duck_conn.Query(data.query);
+
+    auto substrait_conn = Connection(*context.db);
+    auto substrait_rel  = SubstraitPlanToDuckDBRel(substrait_conn.context, serialized, is_json, true);
+
+    auto substrait_result = substrait_rel->Execute();
+    substrait_result->names = duck_result->names;
+
+    unique_ptr<MaterializedQueryResult> substrait_materialized;
+    if (substrait_result->type == QueryResultType::STREAM_RESULT) {
+      auto &stream_query = substrait_result->Cast<StreamQueryResult>();
+      substrait_materialized = stream_query.Materialize();
+    }
+
+    else if (substrait_result->type == QueryResultType::MATERIALIZED_RESULT) {
+      substrait_materialized = unique_ptr_cast<QueryResult, MaterializedQueryResult>(
+        std::move(substrait_result)
+      );
+    }
+
+    auto &duck_coldata = duck_result->Collection();
+    auto &subs_coldata = substrait_materialized->Collection();
+
+    string error_message;
+    if (!ColumnDataCollection::ResultEquals(duck_coldata, subs_coldata, error_message)) {
+      query_plan->Print();
+      substrait_rel->Print();
+
+      Printer::Print(serialized);
+
+      duck_coldata.Print();
+      subs_coldata.Print();
+
+      throw InternalException(
+        "The query result of DuckDB's query plan does not match Substrait : " + error_message
+      );
     }
   }
 
-  if (!optimizer_option_set) {
-    // If the user has not specified what they want, fall back to the settings
-    // on the connection (e.g. if the optimizer was disabled by the user at
-    // the connection level, it would be surprising to enable the optimizer
-    // when generating Substrait).
-    function.enable_optimizer = config.enable_optimizer;
-  }
-}
-
-static unique_ptr<ToSubstraitFunctionData>
-InitToSubstraitFunctionData(const ClientConfig &config, TableFunctionBindInput &input) {
-  auto result = make_uniq<ToSubstraitFunctionData>();
-  result->query = input.inputs[0].ToString();
-  SetOptions(*result, config, input.named_parameters);
-  return result;
-}
-
-static unique_ptr<FunctionData>
-ToSubstraitBind(ClientContext          &context,
-                TableFunctionBindInput &input,
-                vector<LogicalType>    &return_types,
-                vector<string>         &names) {
-  return_types.emplace_back(LogicalType::BLOB);
-  names.emplace_back("Plan Blob");
-  return InitToSubstraitFunctionData(context.config, input);
-}
-
-static unique_ptr<FunctionData>
-ToJsonBind(ClientContext          &context,
-           TableFunctionBindInput &input,
-           vector<LogicalType>    &return_types,
-           vector<string>         &names) {
-  return_types.emplace_back(LogicalType::VARCHAR);
-  names.emplace_back("Json");
-  return InitToSubstraitFunctionData(context.config, input);
-}
-
-shared_ptr<Relation>
-SubstraitPlanToDuckDBRel(shared_ptr<ClientContext> &context,
-                         const string &serialized,
-                         bool json = false,
-                         bool acquire_lock = false) {
-  SubstraitToDuckDB transformer_s2d(context, serialized, json, acquire_lock);
-  return transformer_s2d.TransformPlan();
-}
-
-//! This function matches results of substrait plans with direct Duckdb queries
-//! Is only executed when pragma enable_verification = true
-//! It creates extra connections to be able to execute the consumed DuckDB Plan
-//! And the SQL query itself, ideally this wouldn't be necessary and won't
-//! work for round-tripping tests over temporary objects.
-static void
-VerifySubstraitRoundtrip(unique_ptr<LogicalOperator> &query_plan,
-                         ClientContext               &context,
-                         ToSubstraitFunctionData     &data,
-                         const string                &serialized,
-                         bool is_json) {
-  // We round-trip the generated json and verify if the result is the same
-  auto duck_conn   = Connection(*context.db);
-  auto duck_result = duck_conn.Query(data.query);
-
-  auto substrait_conn = Connection(*context.db);
-  auto substrait_rel  = SubstraitPlanToDuckDBRel(substrait_conn.context, serialized, is_json, true);
-  auto substrait_result = substrait_rel->Execute();
-
-  substrait_result->names = duck_result->names;
-
-  unique_ptr<MaterializedQueryResult> substrait_materialized;
-
-  if (substrait_result->type == QueryResultType::STREAM_RESULT) {
-    auto &stream_query = substrait_result->Cast<StreamQueryResult>();
-    substrait_materialized = stream_query.Materialize();
-  }
-
-  else if (substrait_result->type == QueryResultType::MATERIALIZED_RESULT) {
-    substrait_materialized = unique_ptr_cast<QueryResult, MaterializedQueryResult>(
-      std::move(substrait_result)
-    );
-  }
-
-  auto &duck_coldata = duck_result->Collection();
-  auto &subs_coldata = substrait_materialized->Collection();
-
-  string error_message;
-  if (!ColumnDataCollection::ResultEquals(duck_coldata, subs_coldata, error_message)) {
-    query_plan->Print();
-    substrait_rel->Print();
-
-		Printer::Print(serialized);
-
-    duck_coldata.Print();
-    subs_coldata.Print();
-
-    throw InternalException(
-      "The query result of DuckDB's query plan does not match Substrait : " + error_message
-    );
-  }
-}
-
-static void
-VerifyBlobRoundtrip(unique_ptr<LogicalOperator> &query_plan,
-                    ClientContext               &context,
-                    ToSubstraitFunctionData     &data,
-                    const string                &serialized) {
-  VerifySubstraitRoundtrip(query_plan, context, data, serialized, false);
-}
-
-
-static void
-VerifyJSONRoundtrip(unique_ptr<LogicalOperator> &query_plan,
-                    ClientContext               &context,
-                    ToSubstraitFunctionData     &data,
-                    const string                &serialized) {
-  VerifySubstraitRoundtrip(query_plan, context, data, serialized, true);
-}
-
-
-static void
-ToSubFunctionInternal(ClientContext               &context,
+  static void
+  VerifyBlobRoundtrip(unique_ptr<LogicalOperator> &query_plan,
+                      ClientContext               &context,
                       ToSubstraitFunctionData     &data,
-                      DataChunk                   &output,
-                      unique_ptr<LogicalOperator> &query_plan,
-                      string                      &serialized) {
-  output.SetCardinality(1);
-  query_plan = data.ExtractPlan(context);
-  auto transformer_d2s = DuckDBToSubstrait(context, *query_plan, data.strict);
-  serialized = transformer_d2s.SerializeToString();
-  output.SetValue(0, 0, Value::BLOB_RAW(serialized));
-}
-
-static void
-ToJsonFunctionInternal(ClientContext               &context,
-                       ToSubstraitFunctionData     &data,
-                       DataChunk                   &output,
-                       unique_ptr<LogicalOperator> &query_plan,
-                       string                      &serialized) {
-  output.SetCardinality(1);
-  query_plan = data.ExtractPlan(context);
-  auto transformer_d2s = DuckDBToSubstrait(context, *query_plan, data.strict);
-  serialized = transformer_d2s.SerializeToJson();
-  output.SetValue(0, 0, serialized);
-}
-
-static void ToSubFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-  auto &data = data_p.bind_data->CastNoConst<ToSubstraitFunctionData>();
-  if (data.finished) { return; }
-
-  unique_ptr<LogicalOperator> query_plan;
-  string serialized;
-  ToSubFunctionInternal(context, data, output, query_plan, serialized);
-  data.finished = true;
-
-  if (!context.config.query_verification_enabled) { return; }
-  VerifyBlobRoundtrip(query_plan, context, data, serialized);
-
-  // Also run the ToJson path and verify round-trip for that
-  DataChunk other_output;
-  other_output.Initialize(context, {LogicalType::VARCHAR});
-  ToJsonFunctionInternal(context, data, other_output, query_plan, serialized);
-  VerifyJSONRoundtrip(query_plan, context, data, serialized);
-}
-
-static void ToJsonFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-  auto &data = data_p.bind_data->CastNoConst<ToSubstraitFunctionData>();
-  if (data.finished) { return; }
-
-  unique_ptr<LogicalOperator> query_plan;
-  string serialized;
-  ToJsonFunctionInternal(context, data, output, query_plan, serialized);
-  data.finished = true;
-
-  if (!context.config.query_verification_enabled) { return; }
-  VerifyJSONRoundtrip(query_plan, context, data, serialized);
-
-  // Also run the ToJson path and verify round-trip for that
-  DataChunk other_output;
-  other_output.Initialize(context, {LogicalType::BLOB});
-  ToSubFunctionInternal(context, data, other_output, query_plan, serialized);
-  VerifyBlobRoundtrip(query_plan, context, data, serialized);
-}
-
-//! Container for FromSubstraitBind and BindFnExplainSubstrait
-struct FromSubstraitFunctionData : public TableFunctionData {
-  FromSubstraitFunctionData() = default;
-  shared_ptr<Relation>    plan;
-  unique_ptr<QueryResult> res;
-  unique_ptr<Connection>  conn;
-};
-
-static unique_ptr<TableRef> SubstraitBindReplace(ClientContext &context, TableFunctionBindInput &input, bool is_json) {
-	if (input.inputs[0].IsNull()) {
-		throw BinderException("from_substrait cannot be called with a NULL parameter");
-	}
-
-	string serialized = input.inputs[0].GetValueUnsafe<string>();
-	shared_ptr<ClientContext> c_ptr(&context, do_nothing);
-
-	auto plan = SubstraitPlanToDuckDBRel(c_ptr, serialized, is_json);
-
-	if (!plan.get()->IsReadOnly()) { return nullptr; }
-	return plan->GetTableRef();
-}
-
-static unique_ptr<TableRef> FromSubstraitBindReplace(ClientContext &context, TableFunctionBindInput &input) {
-	return SubstraitBindReplace(context, input, false);
-}
-
-static unique_ptr<TableRef> FromSubstraitBindReplaceJSON(ClientContext &context, TableFunctionBindInput &input) {
-	return SubstraitBindReplace(context, input, true);
-}
-
-static unique_ptr<FunctionData> SubstraitBind(ClientContext &context, TableFunctionBindInput &input,
-                                              vector<LogicalType> &return_types, vector<string> &names, bool is_json) {
-	auto result = make_uniq<FromSubstraitFunctionData>();
-	result->conn = make_uniq<Connection>(*context.db);
-
-	if (input.inputs[0].IsNull()) {
-		throw BinderException("from_substrait cannot be called with a NULL parameter");
-	}
-
-	string serialized = input.inputs[0].GetValueUnsafe<string>();
-	shared_ptr<ClientContext> c_ptr(&context, do_nothing);
-
-	result->plan = SubstraitPlanToDuckDBRel(c_ptr, serialized, is_json);
-
-	for (auto &column : result->plan->Columns()) {
-		return_types.emplace_back(column.Type());
-		names.emplace_back(column.Name());
-	}
-
-	return std::move(result);
-}
-
-static unique_ptr<FunctionData> FromSubstraitBind(ClientContext &context, TableFunctionBindInput &input,
-                                                  vector<LogicalType> &return_types, vector<string> &names) {
-	return SubstraitBind(context, input, return_types, names, false);
-}
-
-static unique_ptr<FunctionData> FromSubstraitBindJSON(ClientContext &context, TableFunctionBindInput &input,
-                                                      vector<LogicalType> &return_types, vector<string> &names) {
-	return SubstraitBind(context, input, return_types, names, true);
-}
-
-static void FromSubFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &data = data_p.bind_data->CastNoConst<FromSubstraitFunctionData>();
-	if (!data.res) {
-		auto con = Connection(*context.db);
-		data.plan->context = make_shared_ptr<ClientContextWrapper>(con.context);
-		data.res = data.plan->Execute();
-	}
-
-	auto result_chunk = data.res->Fetch();
-	if (!result_chunk) { return; }
-
-	output.Move(*result_chunk);
-}
-
-
-struct OptimizeMohairFunctionData : public TableFunctionData {
-  OptimizeMohairFunctionData() = default;
-
-  unique_ptr<DuckDBTranslator>      translator;
-  shared_ptr<Relation>              plan_rel;
-  unique_ptr<LogicalOperator>       logical_plan;
-  shared_ptr<PreparedStatementData> plan_data;
-  unique_ptr<QueryResult>           res;
-
-  bool is_optimized { false };
-};
-
-struct ExecMohairFunctionData : public TableFunctionData {
-  ExecMohairFunctionData() = default;
-
-  unique_ptr<DuckDBTranslator> translator;
-  shared_ptr<Relation>         exec_plan;
-  unique_ptr<QueryResult>      res;
-};
-
-static unique_ptr<FunctionData>
-BindingTranspileMohair( ClientContext&          context
-                       ,TableFunctionBindInput& input
-                       ,vector<LogicalType>&    return_types
-                       ,vector<string>&         names) {
-
-  if (input.inputs[0].IsNull()) {
-    throw BinderException("from_substrait cannot be called with a NULL parameter");
+                      const string                &serialized) {
+    VerifySubstraitRoundtrip(query_plan, context, data, serialized, false);
   }
 
-  auto fn_data        = make_uniq<OptimizeMohairFunctionData>();
-  fn_data->translator = make_uniq<DuckDBTranslator>(context);
-  fn_data->plan_data  = make_shared<PreparedStatementData>(StatementType::SELECT_STATEMENT);
-
-  string plan_msg { input.inputs[0].GetValueUnsafe<string>() };
-  fn_data->plan_rel     = fn_data->translator->TranslatePlanMessage(plan_msg);
-  fn_data->logical_plan = fn_data->translator->TranspilePlanRel(fn_data->plan_rel);
-
-  for (auto &column : fn_data->plan_rel->Columns()) {
-    // For duckdb framework to do something with
-    return_types.emplace_back(column.Type());
-    names.emplace_back(column.Name());
-
-    // For us to further build PreparedStatementData
-    // (probably affects our ResultCollector)
-    fn_data->plan_data->types.emplace_back(column.Type());
-    fn_data->plan_data->names.emplace_back(column.Name());
+  static void
+  VerifyJSONRoundtrip(unique_ptr<LogicalOperator> &query_plan,
+                      ClientContext               &context,
+                      ToSubstraitFunctionData     &data,
+                      const string                &serialized) {
+    VerifySubstraitRoundtrip(query_plan, context, data, serialized, true);
   }
 
-  return std::move(fn_data);
-}
-
-static unique_ptr<FunctionData>
-BindingTranslateMohair( ClientContext&          context
-                       ,TableFunctionBindInput& input
-                       ,vector<LogicalType>&    return_types
-                       ,vector<string>&         names) {
-
-  if (input.inputs[0].IsNull()) {
-    throw BinderException("from_substrait cannot be called with a NULL parameter");
+  static void
+  ToSubFunctionInternal(ClientContext               &context,
+                        ToSubstraitFunctionData     &data,
+                        DataChunk                   &output,
+                        unique_ptr<LogicalOperator> &query_plan,
+                        string                      &serialized) {
+    output.SetCardinality(1);
+    query_plan = data.ExtractPlan(context);
+    auto transformer_d2s = DuckDBToSubstrait(context, *query_plan, data.strict);
+    serialized = transformer_d2s.SerializeToString();
+    output.SetValue(0, 0, Value::BLOB_RAW(serialized));
   }
 
-  string plan_msg { input.inputs[0].GetValueUnsafe<string>() };
-  auto   result   = make_uniq<ExecMohairFunctionData>();
+  static void ToSubFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+    auto &data = data_p.bind_data->CastNoConst<ToSubstraitFunctionData>();
+    if (data.finished) { return; }
 
-  result->translator = make_uniq<DuckDBTranslator>(context);
-  result->exec_plan  = result->translator->TranslatePlanMessage(plan_msg);
+    unique_ptr<LogicalOperator> query_plan;
+    string serialized;
+    ToSubFunctionInternal(context, data, output, query_plan, serialized);
+    data.finished = true;
 
-  for (auto &column : result->exec_plan->Columns()) {
-    return_types.emplace_back(column.Type());
-    names.emplace_back(column.Name());
+    if (!context.config.query_verification_enabled) { return; }
+    VerifyBlobRoundtrip(query_plan, context, data, serialized);
+
+    // Also run the ToJson path and verify round-trip for that
+    DataChunk other_output;
+    other_output.Initialize(context, {LogicalType::VARCHAR});
+    ToJsonFunctionInternal(context, data, other_output, query_plan, serialized);
+    VerifyJSONRoundtrip(query_plan, context, data, serialized);
   }
 
-  return std::move(result);
-}
+  static void
+  ToJsonFunctionInternal(ClientContext               &context,
+                         ToSubstraitFunctionData     &data,
+                         DataChunk                   &output,
+                         unique_ptr<LogicalOperator> &query_plan,
+                         string                      &serialized) {
+    output.SetCardinality(1);
+    query_plan = data.ExtractPlan(context);
+    auto transformer_d2s = DuckDBToSubstrait(context, *query_plan, data.strict);
+    serialized = transformer_d2s.SerializeToJson();
+    output.SetValue(0, 0, serialized);
+  }
 
-static void
-TableFnOptimizeMohair( ClientContext&      context
-                      ,TableFunctionInput& data_p
-                      ,DataChunk&          output) {
-  auto &fn_data = (OptimizeMohairFunctionData &) *(data_p.bind_data);
+  static void ToJsonFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+    auto &data = data_p.bind_data->CastNoConst<ToSubstraitFunctionData>();
+    if (data.finished) { return; }
 
-  if (!fn_data.res) {
-    shared_ptr<Binder> binder = Binder::CreateBinder(context);
+    unique_ptr<LogicalOperator> query_plan;
+    string serialized;
+    ToJsonFunctionInternal(context, data, output, query_plan, serialized);
+    data.finished = true;
 
-    // >> Optimization phase
-    std::cout << "[Optimization] >>" << std::endl;
-    std::cout << "\t[Optimizer]: declare" << std::endl;
-    Optimizer optimizer { *binder, context };
+    if (!context.config.query_verification_enabled) { return; }
+    VerifyJSONRoundtrip(query_plan, context, data, serialized);
 
-    std::cout << "\t[Optimizer]: optimize" << std::endl;
-    fn_data.is_optimized = true;
-    fn_data.logical_plan = optimizer.Optimize(std::move(fn_data.logical_plan));
+    // Also run the ToJson path and verify round-trip for that
+    DataChunk other_output;
+    other_output.Initialize(context, {LogicalType::BLOB});
+    ToSubFunctionInternal(context, data, other_output, query_plan, serialized);
+    VerifyBlobRoundtrip(query_plan, context, data, serialized);
+  }
 
-    // >> Planning phase
-    std::cout << "[Planning] >>" << std::endl;
-    std::cout << "\t[Planner]: declare" << std::endl;
-    PhysicalPlanGenerator physical_planner { context };
 
-    std::cout << "\t[Planner]: create physical plan" << std::endl;
-    fn_data.plan_data->plan = physical_planner.CreatePlan(
-      std::move(fn_data.logical_plan)
-    );
+  // ------------------------------
+  // Supporting functions for Table Function "translate_mohair"
 
-    std::cout << "\t[Planner]: define collector" << std::endl;
-    auto result_collector = PhysicalResultCollector::GetResultCollector(
-      context, *(fn_data.plan_data)
-    );
+  //! Container for FromSubstraitBind function data
+  struct FromSubstraitFunctionData : public TableFunctionData {
+    FromSubstraitFunctionData() = default;
 
-    // >> Execution phase
-    std::cout << "[Execution] >>" << std::endl;
-    constexpr bool dry_run       { false };
-    Executor       plan_executor { context };
+    shared_ptr<Relation>    plan;
+    unique_ptr<QueryResult> result;
+    unique_ptr<Connection>  conn;
+  };
 
-    std::cout << "\t[Executor]: initialize" << std::endl;
-    plan_executor.Initialize(std::move(result_collector));
+  //! `Bind` implementation for "from_substrait" table function
+  static unique_ptr<FunctionData> SubstraitBind(ClientContext &context, TableFunctionBindInput &input,
+                  vector<LogicalType> &return_types, vector<string> &names, bool is_json) {
+    auto result = make_uniq<FromSubstraitFunctionData>();
+    result->conn = make_uniq<Connection>(*context.db);
 
-    std::cout << "\t[Executor]: execute first task" << std::endl;
-    auto exec_result = plan_executor.ExecuteTask(dry_run);
-
-    std::cout << "\t[Executor]: execute remaining tasks" << std::endl;
-    while (exec_result != PendingExecutionResult::RESULT_READY) {
-      switch (exec_result) {
-        case PendingExecutionResult::RESULT_NOT_READY:
-        case PendingExecutionResult::RESULT_READY:
-          break;
-
-        case PendingExecutionResult::BLOCKED:
-          std::cout << "\t[Executor]: blocked" << std::endl;
-          break;
-
-        case PendingExecutionResult::NO_TASKS_AVAILABLE:
-          std::cout << "\t[Executor]: waiting for tasks" << std::endl;
-          break;
-
-        case PendingExecutionResult::EXECUTION_ERROR:
-          std::cerr << "\t[Executor]: execution error: "
-                    << plan_executor.GetError().Message()
-                    << std::endl
-          ;
-          return;
-
-        default:
-          std::cerr << "\t[Executor]: unknown result" << std::endl;
-          return;
-      }
-
-      exec_result = plan_executor.ExecuteTask(dry_run);
+    if (input.inputs[0].IsNull()) {
+      throw BinderException("from_substrait cannot be called with a NULL parameter");
     }
 
-    std::cout << "\t[Executor]: checking for result" << std::endl;
-    if (exec_result == PendingExecutionResult::RESULT_READY) {
+    string serialized = input.inputs[0].GetValueUnsafe<string>();
+    shared_ptr<ClientContext> c_ptr(&context, do_nothing);
 
-      if (plan_executor.HasResultCollector()) {
-        std::cout << "\t[Executor]: gather result" << std::endl;
-        fn_data.res = std::move(plan_executor.GetResult());
-      }
-      else {
-        std::cerr << "\t[Executor]: missing result collector" << std::endl;
-        return;
-      }
+    result->plan = SubstraitPlanToDuckDBRel(c_ptr, serialized, is_json);
+
+    for (auto &column : result->plan->Columns()) {
+      return_types.emplace_back(column.Type());
+      names.emplace_back(column.Name());
     }
+
+    return std::move(result);
   }
 
-  auto result_chunk = fn_data.res->Fetch();
-  if (!result_chunk) { return; }
+  //! `BindReplace` implementation for "from_substrait" table function
+  static unique_ptr<TableRef> SubstraitBindReplace(ClientContext &context, TableFunctionBindInput &input, bool is_json) {
+    if (input.inputs[0].IsNull()) {
+      throw BinderException("from_substrait cannot be called with a NULL parameter");
+    }
+    string serialized = input.inputs[0].GetValueUnsafe<string>();
+    shared_ptr<ClientContext> c_ptr(&context, deleter_noop);
 
-  output.Move(*result_chunk);
-}
+    auto plan = SubstraitPlanToDuckDBRel(c_ptr, serialized, is_json);
 
-static void
-TableFnExecuteMohair( ClientContext&      context
-                     ,TableFunctionInput& data_p
-                     ,DataChunk&          output) {
-  auto &fn_data = (ExecMohairFunctionData &) *(data_p.bind_data);
-  if (!fn_data.res) { fn_data.res = fn_data.exec_plan->Execute(); }
+	  if (!plan.get()->IsReadOnly()) { return nullptr; }
+    return plan->GetTableRef();
+  }
 
-  auto result_chunk = fn_data.res->Fetch();
-  if (!result_chunk) { return; }
+  //! Default `Bind` wrapper for "from_substrait" table function
+  static unique_ptr<FunctionData> FromSubstraitBind(ClientContext &context, TableFunctionBindInput &input,
+                vector<LogicalType> &return_types, vector<string> &names) {
+    return SubstraitBind(context, input, return_types, names, false);
+  }
 
-  output.Move(*result_chunk);
-}
+  //! Default `BindReplace` wrapper for "from_substrait" table function
+  static unique_ptr<TableRef> FromSubstraitBindReplace(ClientContext &context, TableFunctionBindInput &input) {
+    return SubstraitBindReplace(context, input, false);
+  }
 
-void InitializeGetSubstrait(const Connection &con) {
-  auto &catalog = Catalog::GetSystemCatalog(*con.context);
-  // create the get_substrait table function that allows us to get a substrait
-  // binary from a valid SQL Query
-  TableFunction to_sub_func("get_substrait", {LogicalType::VARCHAR}, ToSubFunction, ToSubstraitBind);
-  to_sub_func.named_parameters["enable_optimizer"] = LogicalType::BOOLEAN;
-  to_sub_func.named_parameters["strict"]           = LogicalType::BOOLEAN;
-  CreateTableFunctionInfo to_sub_info(to_sub_func);
-  catalog.CreateTableFunction(*con.context, to_sub_info);
-}
+  //! JSON-specific `Bind` wrapper for "from_substrait" table function
+  static unique_ptr<FunctionData> FromSubstraitBindJSON(ClientContext &context, TableFunctionBindInput &input,
+                    vector<LogicalType> &return_types, vector<string> &names) {
+    return SubstraitBind(context, input, return_types, names, true);
+  }
 
-void InitializeGetSubstraitJSON(const Connection &con) {
-  auto &catalog = Catalog::GetSystemCatalog(*con.context);
+  //! JSON-specific `BindReplace` wrapper for "from_substrait" table function
+  static unique_ptr<TableRef> FromSubstraitBindReplaceJSON(ClientContext &context, TableFunctionBindInput &input) {
+    return SubstraitBindReplace(context, input, true);
+  }
 
-  // create the get_substrait table function that allows us to get a substrait
-  // JSON from a valid SQL Query
-  TableFunction get_substrait_json("get_substrait_json", {LogicalType::VARCHAR}, ToJsonFunction, ToJsonBind);
-  get_substrait_json.named_parameters["enable_optimizer"] = LogicalType::BOOLEAN;
+  //! `Exec` implementation for "from_substrait" table function
+  static void FromSubFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+    auto &data = data_p.bind_data->CastNoConst<FromSubstraitFunctionData>();
+    if (!data.res) {
+      auto con = Connection(*context.db);
+      data.plan->context = make_shared_ptr<ClientContextWrapper>(con.context);
+      data.res = data.plan->Execute();
+    }
 
-  CreateTableFunctionInfo get_substrait_json_info(get_substrait_json);
-  catalog.CreateTableFunction(*con.context, get_substrait_json_info);
-}
+    auto result_chunk = data.res->Fetch();
+    if (!result_chunk) { return; }
 
-void InitializeTranspileMohair(Connection &con) {
-  auto &catalog = Catalog::GetSystemCatalog(*(con.context));
+    output.Move(*result_chunk);
+  }
 
-<<<<<<< HEAD
-	// create the from_mohair table function
-	TableFunction tablefn_mohair(
-	   "transpile_mohair"
-	  ,{ LogicalType::BLOB }
-	  ,TableFnOptimizeMohair
-	  ,BindingTranslateMohair
-	);
-=======
-  // create the from_mohair table function
-  TableFunction tablefn_mohair(
-     "transpile_mohair"
-    ,{ LogicalType::BLOB }
-    ,TableFnOptimizeMohair
-    ,BindingTranspileMohair
-  );
->>>>>>> d734f5e (style: replaced tabs with spaces)
 
-  CreateTableFunctionInfo fninfo_mohair(tablefn_mohair);
-  catalog.CreateTableFunction(*(con.context), fninfo_mohair);
-}
+  // ------------------------------
+  // Supporting functions for Table Function "translate_mohair"
 
-void InitializeTranslateMohair(Connection &con) {
-  auto &catalog = Catalog::GetSystemCatalog(*(con.context));
+  static unique_ptr<FunctionData>
+  BindingFnTranslateMohair( ClientContext&          context
+                           ,TableFunctionBindInput& input
+                           ,vector<LogicalType>&    return_types
+                           ,vector<string>&         names) {
+    if (input.inputs[0].IsNull()) {
+      throw BinderException("from_substrait cannot be called with a NULL parameter");
+    }
+    string plan_msg         { input.inputs[0].GetValueUnsafe<string>()                      };
+    bool   enable_optimizer { GetOptimizationOption(context.config, input.named_parameters) };
 
-<<<<<<< HEAD
-	// create the from_mohair table function
-	TableFunction tablefn_mohair(
-	   "execute_mohair"
-	  ,{ LogicalType::BLOB }
-	  ,TableFnExecuteMohair
-	  ,BindingTranslateMohair
-	);
-=======
-  // create the from_mohair table function
-  TableFunction tablefn_mohair(
-     "execute_mohair"
-    ,{ LogicalType::BLOB }
-    ,TableFnExecuteMohair
-    ,BindingTranslateMohair
-  );
->>>>>>> d734f5e (style: replaced tabs with spaces)
+    // Prepare a FunctionData instance to return
+    auto fn_data = make_uniq<FnDataSubstraitTranslation>();
+    fn_data->translator = make_uniq<DuckDBTranslator>(context);
+    fn_data->sys_plan   = fn_data->translator->TranslatePlanMessage(plan_msg);
+    fn_data->plan_data  = std::make_shared<PreparedStatementData>(StatementType::SELECT_STATEMENT);
 
-  CreateTableFunctionInfo fninfo_mohair(tablefn_mohair);
-  catalog.CreateTableFunction(*(con.context), fninfo_mohair);
-}
+    for (auto &column : fn_data->sys_plan->engine->Columns()) {
+      fn_data->plan_data->types.emplace_back(column.Type());
+      fn_data->plan_data->names.emplace_back(column.Name());
+    }
 
-void InitializeFromSubstrait(const Connection &con) {
-  auto &catalog = Catalog::GetSystemCatalog(*con.context);
+    // Set result schema (binding)
+    return_types.emplace_back(LogicalType::VARCHAR);
+    names.emplace_back("Physical Plan");
 
-<<<<<<< HEAD
-	// create the from_substrait table function that allows us to get a query
-	// result from a substrait plan
-	TableFunction from_sub_func(
-	   "from_substrait"
-	  ,{LogicalType::BLOB}
-	  ,FromSubFunction
-	  ,FromSubstraitBind
-	);
+    return std::move(fn_data);
+  }
 
-	from_sub_func.bind_replace = FromSubstraitBindReplace;
-=======
-  // create the from_substrait table function that allows us to get a query
-  // result from a substrait plan
-  TableFunction from_sub_func("from_substrait", {LogicalType::BLOB}, nullptr, nullptr);
-  from_sub_func.bind_replace = FromSubstraitBind;
->>>>>>> d734f5e (style: replaced tabs with spaces)
+  static void
+  TableFnTranslateMohair( ClientContext&      context
+                         ,TableFunctionInput& data_p
+                         ,DataChunk&          output) {
+    auto &fn_data = (FnDataSubstraitTranslation&) *(data_p.bind_data);
+    if (fn_data.finished) { return; }
 
-  CreateTableFunctionInfo from_sub_info(from_sub_func);
-  catalog.CreateTableFunction(*con.context, from_sub_info);
-}
+    if (not fn_data.exec_plan) {
+      // Convert plan to engine plan
+      fn_data.engine_plan = fn_data.translator->TranspilePlanMessage(fn_data.sys_plan);
 
-void InitializeFromSubstraitJSON(const Connection &con) {
-<<<<<<< HEAD
-	auto &catalog = Catalog::GetSystemCatalog(*con.context);
-	// create the from_substrait table function that allows us to get a query
-	// result from a substrait plan
-	TableFunction from_sub_func_json(
-	   "from_substrait_json"
-	  ,{LogicalType::VARCHAR}
-	  ,FromSubFunction
-	  ,FromSubstraitBindJSON
-	);
+      // Convert engine plan to execution plan
+      fn_data.exec_plan = fn_data.translator->TranslateLogicalPlan(
+        fn_data.engine_plan, fn_data.enable_optimizer
+      );
 
-	from_sub_func_json.bind_replace = FromSubstraitBindReplaceJSON;
+      fn_data.finished = true;
+    }
 
-	CreateTableFunctionInfo from_sub_info_json(from_sub_func_json);
-	catalog.CreateTableFunction(*con.context, from_sub_info_json);
-=======
-  auto &catalog = Catalog::GetSystemCatalog(*con.context);
+    // output.Initialize(context, { LogicalType::VARCHAR }, 1);
+    output.SetCardinality(1);
+    output.SetValue(0, 0, fn_data.exec_plan->engine->ToString());
+  }
 
-  // create the from_substrait table function that allows us to get a query
-  // result from a substrait plan
-  TableFunction from_sub_func_json("from_substrait_json", {LogicalType::VARCHAR}, nullptr, nullptr);
-  from_sub_func_json.bind_replace = FromSubstraitBindJSON;
 
-  CreateTableFunctionInfo from_sub_info_json(from_sub_func_json);
-  catalog.CreateTableFunction(*con.context, from_sub_info_json);
->>>>>>> d734f5e (style: replaced tabs with spaces)
-}
+  // ------------------------------
+  // Supporting functions for Table Function "execute_mohair"
 
-void SubstraitExtension::Load(DuckDB &db) {
-  Connection con(db);
-  con.BeginTransaction();
+  static unique_ptr<FunctionData>
+  BindingFnExecuteMohair( ClientContext&          context
+                         ,TableFunctionBindInput& input
+                         ,vector<LogicalType>&    return_types
+                         ,vector<string>&         names) {
+    if (input.inputs[0].IsNull()) {
+      throw BinderException("from_substrait cannot be called with a NULL parameter");
+    }
 
-  InitializeGetSubstrait(con);
-  InitializeGetSubstraitJSON(con);
+    string plan_msg { input.inputs[0].GetValueUnsafe<string>() };
 
-  InitializeFromSubstrait(con);
-  InitializeFromSubstraitJSON(con);
-  InitializeTranspileMohair(con);
-  InitializeTranslateMohair(con);
+    auto result = make_uniq<FnDataSubstraitExecution>();
+    result->translator = make_uniq<DuckDBTranslator>(context);
+    result->sys_plan   = result->translator->TranslatePlanMessage(plan_msg);
 
-  con.Commit();
-}
+    for (auto &column : result->sys_plan->engine->Columns()) {
+      return_types.emplace_back(column.Type());
+      names.emplace_back(column.Name());
+    }
 
-std::string SubstraitExtension::Name() {
-  return "substrait";
-}
+    return result;
+  }
+
+  static void
+  TableFnExecuteMohair( ClientContext&      context
+                       ,TableFunctionInput& data_p
+                       ,DataChunk&          output) {
+    auto& fn_data = (FnDataSubstraitExecution&) *(data_p.bind_data);
+
+    if (!fn_data.result) {
+      fn_data.result = fn_data.sys_plan->engine->Execute();
+    }
+
+    auto result_chunk = fn_data.result->Fetch();
+    if (result_chunk) { output.Move(*result_chunk); }
+  }
+
+
+  // ------------------------------
+  // Initializers for Table Functions that implement extension logic
+
+  //! Create a TableFunction, "get_substrait", then register it with the catalog
+  void InitializeGetSubstrait(const Connection &con) {
+    TableFunction to_sub_func(
+       "get_substrait"
+      ,{ LogicalType::VARCHAR }
+      ,ToSubFunction
+      ,ToSubstraitBind
+    );
+
+    to_sub_func.named_parameters["enable_optimizer"] = LogicalType::BOOLEAN;
+    to_sub_func.named_parameters["strict"]           = LogicalType::BOOLEAN;
+
+    CreateTableFunctionInfo to_sub_info(to_sub_func);
+
+    auto &catalog = Catalog::GetSystemCatalog(*con.context);
+    catalog.CreateTableFunction(*con.context, to_sub_info);
+  }
+
+  //! Create a TableFunction, "get_substrait_json", then register it with the catalog
+  void InitializeGetSubstraitJSON(const Connection &con) {
+    TableFunction get_substrait_json(
+       "get_substrait_json"
+      ,{LogicalType::VARCHAR}
+      ,ToJsonFunction
+      ,ToJsonBind
+    );
+
+    get_substrait_json.named_parameters["enable_optimizer"] = LogicalType::BOOLEAN;
+
+    CreateTableFunctionInfo get_substrait_json_info(get_substrait_json);
+
+    auto &catalog = Catalog::GetSystemCatalog(*con.context);
+    catalog.CreateTableFunction(*con.context, get_substrait_json_info);
+  }
+
+  //! Create a TableFunction, "translate_mohair", then register it with the catalog
+  void InitializeTranslateMohair(Connection &con) {
+    TableFunction tablefn_mohair(
+       "translate_mohair"
+      ,{ LogicalType::BLOB }
+      ,TableFnTranslateMohair
+      ,BindingFnTranslateMohair
+    );
+
+    CreateTableFunctionInfo fninfo_mohair(tablefn_mohair);
+
+    auto &catalog = Catalog::GetSystemCatalog(*(con.context));
+    catalog.CreateTableFunction(*(con.context), fninfo_mohair);
+  }
+
+  //! Create a TableFunction, "execute_mohair", then register it with the catalog
+  void InitializeExecuteMohair(Connection &con) {
+    TableFunction tablefn_mohair(
+       "execute_mohair"
+      ,{ LogicalType::BLOB }
+      ,TableFnExecuteMohair
+      ,BindingFnExecuteMohair
+    );
+
+    CreateTableFunctionInfo fninfo_mohair(tablefn_mohair);
+
+    auto &catalog = Catalog::GetSystemCatalog(*(con.context));
+    catalog.CreateTableFunction(*(con.context), fninfo_mohair);
+  }
+
+  //! Create a TableFunction, "from_substrait", then register it with the catalog
+  void InitializeFromSubstrait(const Connection &con) {
+    TableFunction from_sub_func(
+       "from_substrait"
+      ,{LogicalType::BLOB}
+      ,FromSubFunction
+      ,FromSubstraitBind
+    );
+    from_sub_func.bind_replace = FromSubstraitBindReplace;
+
+    CreateTableFunctionInfo from_sub_info(from_sub_func);
+
+    auto &catalog = Catalog::GetSystemCatalog(*con.context);
+    catalog.CreateTableFunction(*con.context, from_sub_info);
+  }
+
+  //! Create a TableFunction, "from_substrait_json", then register it with the catalog
+  void InitializeFromSubstraitJSON(const Connection &con) {
+    TableFunction from_sub_func_json(
+       "from_substrait_json"
+      ,{LogicalType::VARCHAR}
+      ,FromSubFunction
+      ,FromSubstraitBindJSON
+    );
+    from_sub_func_json.bind_replace = FromSubstraitBindReplaceJSON;
+
+    CreateTableFunctionInfo from_sub_info_json(from_sub_func_json);
+
+    auto &catalog = Catalog::GetSystemCatalog(*con.context);
+    catalog.CreateTableFunction(*con.context, from_sub_info_json);
+  }
+
+  //! Logic for loading this extension
+  void SubstraitExtension::Load(DuckDB &db) {
+    Connection con(db);
+    con.BeginTransaction();
+
+    InitializeGetSubstrait(con);
+    InitializeGetSubstraitJSON(con);
+
+    InitializeFromSubstrait(con);
+    InitializeFromSubstraitJSON(con);
+    InitializeTranslateMohair(con);
+    InitializeExecuteMohair(con);
+
+    con.Commit();
+  }
+
+  std::string SubstraitExtension::Name() {
+    return "substrait";
+  }
 
 } // namespace duckdb
 
+
 extern "C" {
 
-DUCKDB_EXTENSION_API void substrait_init(duckdb::DatabaseInstance &db) {
-  duckdb::DuckDB db_wrapper(db);
-  db_wrapper.LoadExtension<duckdb::SubstraitExtension>();
-}
+  DUCKDB_EXTENSION_API
+  void substrait_init(duckdb::DatabaseInstance& db) {
+    duckdb::DuckDB db_wrapper(db);
+    db_wrapper.LoadExtension<duckdb::SubstraitExtension>();
+  }
 
-DUCKDB_EXTENSION_API const char *substrait_version() {
-  return duckdb::DuckDB::LibraryVersion();
-}
+  DUCKDB_EXTENSION_API
+  const char* substrait_version() {
+    return duckdb::DuckDB::LibraryVersion();
+  }
 }
