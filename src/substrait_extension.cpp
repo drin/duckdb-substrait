@@ -3,6 +3,7 @@
 #include "substrait_extension.hpp"
 #include "from_substrait.hpp"
 #include "to_substrait.hpp"
+#include "plans.hpp"
 
 #include "duckdb/execution/column_binding_resolver.hpp"
 #include "duckdb/optimizer/optimizer.hpp"
@@ -322,10 +323,96 @@ static void FromSubFunction(ClientContext &context, TableFunctionInput &data_p, 
 		data.plan->context = make_shared_ptr<ClientContextWrapper>(con.context);
 		data.res = data.plan->Execute();
 	}
+
 	auto result_chunk = data.res->Fetch();
-	if (!result_chunk) {
-		return;
+	if (!result_chunk) { return; }
+
+	output.Move(*result_chunk);
+}
+
+
+//! Container for TableFnExplainSubstrait to get data from BindFnExplainSubstrait
+struct FromSubstraitFunctionData : public TableFunctionData {
+	FromSubstraitFunctionData() = default;
+	shared_ptr<Relation> plan;
+	unique_ptr<QueryResult> res;
+	unique_ptr<Connection> conn;
+};
+
+static unique_ptr<FunctionData>
+BindingTranspileMohair( ClientContext&          context
+           ,TableFunctionBindInput& input
+           ,vector<LogicalType>&    return_types
+           ,vector<string>&         names) {
+
+	if (input.inputs[0].IsNull()) {
+		throw BinderException("from_substrait cannot be called with a NULL parameter");
 	}
+
+  DuckDBTranslator translator { context };
+	string           plan_msg   { input.inputs[0].GetValueUnsafe<string>() };
+
+	auto result          = make_uniq<OptimizeMohairFunctionData>();
+	result->logical_plan = translator.TranslatePlanMessage(plan_msg);
+
+	for (auto &column : result->logical_plan->Columns()) {
+		return_types.emplace_back(column.Type());
+		names.emplace_back(column.Name());
+	}
+
+	return std::move(result);
+}
+
+static unique_ptr<FunctionData>
+BindingTranslateMohair( ClientContext&          context
+           ,TableFunctionBindInput& input
+           ,vector<LogicalType>&    return_types
+           ,vector<string>&         names) {
+
+	if (input.inputs[0].IsNull()) {
+		throw BinderException("from_substrait cannot be called with a NULL parameter");
+	}
+
+  DuckDBTranslator translator { context };
+	string           plan_msg   { input.inputs[0].GetValueUnsafe<string>() };
+
+	auto result       = make_uniq<ExecMohairFunctionData>();
+	result->exec_plan = translator.TranslatePlanMessage(plan_msg);
+
+	for (auto &column : result->exec_plan->Columns()) {
+		return_types.emplace_back(column.Type());
+		names.emplace_back(column.Name());
+	}
+
+	return std::move(result);
+}
+
+static void
+TableFnOptimizeMohair( ClientContext&      context
+                      ,TableFunctionInput& data_p
+                      ,DataChunk&          output) {
+	auto &fn_data = (OptimizeMohairFunctionData &) *(data_p.bind_data);
+	if (!fn_data.res) {
+    // TODO: optimize then translate to physical plan
+    std::cout << "TODO: optimize plan" << std::endl;
+  }
+
+	auto result_chunk = fn_data.res->Fetch();
+	if (!result_chunk) { return; }
+
+	output.Move(*result_chunk);
+}
+
+static void
+TableFnExecuteMohair( ClientContext&      context
+                     ,TableFunctionInput& data_p
+                     ,DataChunk&          output) {
+	auto &fn_data = (ExecMohairFunctionData &) *(data_p.bind_data);
+	if (!fn_data.res) { fn_data.res = fn_data.exec_plan->Execute(); }
+
+	auto result_chunk = fn_data.res->Fetch();
+	if (!result_chunk) { return; }
+
 	output.Move(*result_chunk);
 }
 
@@ -351,13 +438,50 @@ void InitializeGetSubstraitJSON(const Connection &con) {
 	catalog.CreateTableFunction(*con.context, get_substrait_json_info);
 }
 
+void InitializeTranspileMohair(Connection &con) {
+	auto &catalog = Catalog::GetSystemCatalog(*(con.context));
+
+	// create the from_mohair table function
+	TableFunction tablefn_mohair(
+	   "transpile_mohair"
+	  ,{ LogicalType::BLOB }
+	  ,TableFnExecuteMohair
+	  ,BindingTranslateMohair
+	);
+
+	CreateTableFunctionInfo fninfo_mohair(tablefn_mohair);
+	catalog.CreateTableFunction(*(con.context), fninfo_mohair);
+}
+
+void InitializeTranslateMohair(Connection &con) {
+	auto &catalog = Catalog::GetSystemCatalog(*(con.context));
+
+	// create the from_mohair table function
+	TableFunction tablefn_mohair(
+	   "execute_mohair"
+	  ,{ LogicalType::BLOB }
+	  ,TableFnExecuteMohair
+	  ,BindingTranslateMohair
+	);
+
+	CreateTableFunctionInfo fninfo_mohair(tablefn_mohair);
+	catalog.CreateTableFunction(*(con.context), fninfo_mohair);
+}
+
 void InitializeFromSubstrait(const Connection &con) {
 	auto &catalog = Catalog::GetSystemCatalog(*con.context);
 
 	// create the from_substrait table function that allows us to get a query
 	// result from a substrait plan
-	TableFunction from_sub_func("from_substrait", {LogicalType::BLOB}, FromSubFunction, FromSubstraitBind);
+	TableFunction from_sub_func(
+	   "from_substrait"
+	  ,{LogicalType::BLOB}
+	  ,FromSubFunction
+	  ,FromSubstraitBind
+	);
+
 	from_sub_func.bind_replace = FromSubstraitBindReplace;
+
 	CreateTableFunctionInfo from_sub_info(from_sub_func);
 	catalog.CreateTableFunction(*con.context, from_sub_info);
 }
@@ -366,9 +490,15 @@ void InitializeFromSubstraitJSON(const Connection &con) {
 	auto &catalog = Catalog::GetSystemCatalog(*con.context);
 	// create the from_substrait table function that allows us to get a query
 	// result from a substrait plan
-	TableFunction from_sub_func_json("from_substrait_json", {LogicalType::VARCHAR}, FromSubFunction,
-	                                 FromSubstraitBindJSON);
+	TableFunction from_sub_func_json(
+	   "from_substrait_json"
+	  ,{LogicalType::VARCHAR}
+	  ,FromSubFunction
+	  ,FromSubstraitBindJSON
+	);
+
 	from_sub_func_json.bind_replace = FromSubstraitBindReplaceJSON;
+
 	CreateTableFunctionInfo from_sub_info_json(from_sub_func_json);
 	catalog.CreateTableFunction(*con.context, from_sub_info_json);
 }
@@ -382,6 +512,8 @@ void SubstraitExtension::Load(DuckDB &db) {
 
 	InitializeFromSubstrait(con);
 	InitializeFromSubstraitJSON(con);
+  InitializeTranspileMohair(con);
+  InitializeTranslateMohair(con);
 
 	con.Commit();
 }
