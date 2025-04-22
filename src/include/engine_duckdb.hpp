@@ -57,6 +57,7 @@
 #include "duckdb/optimizer/optimizer.hpp"
 
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/execution/physical_plan_generator.hpp"
 #include "duckdb/execution/operator/helper/physical_result_collector.hpp"
 
 #include "custom_extensions/custom_extensions.hpp"
@@ -121,7 +122,7 @@ namespace duckdb {
     unique_ptr<DuckDBTranslator> translator;
     shared_ptr<DuckSystemPlan>   sys_plan;
     unique_ptr<LogicalOperator>  logical_plan;
-    unique_ptr<PhysicalOperator> physical_plan;
+    unique_ptr<PhysicalPlan>     physical_plan;
 
     bool enable_optimizer;
     bool finished { false };
@@ -170,7 +171,7 @@ namespace duckdb {
     unique_ptr<LogicalOperator>  TranspilePlanMessage(Relation& plan_rel);
 
     //! Transforms DuckDB Logical Operator to DuckDB Physical Operator
-    unique_ptr<PhysicalOperator> TranslateLogicalPlan(LogicalOperator& logical_plan, bool optimize);
+    unique_ptr<PhysicalPlan> TranslateLogicalPlan(LogicalOperator& logical_plan, bool optimize);
 
     private:
       ClientContext&                           context;
