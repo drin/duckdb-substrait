@@ -329,7 +329,7 @@ namespace duckdb {
     }
 
     string serialized = input.inputs[0].GetValueUnsafe<string>();
-    shared_ptr<ClientContext> c_ptr(&context, do_nothing);
+    shared_ptr<ClientContext> c_ptr(&context, deleter_noop);
 
     result->plan = SubstraitPlanToDuckDBRel(c_ptr, serialized, is_json);
 
@@ -380,13 +380,13 @@ namespace duckdb {
   //! `Exec` implementation for "from_substrait" table function
   static void FromSubFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
     auto &data = data_p.bind_data->CastNoConst<FromSubstraitFunctionData>();
-    if (!data.res) {
+    if (!data.result) {
       auto con = Connection(*context.db);
       data.plan->context = make_shared_ptr<ClientContextWrapper>(con.context);
-      data.res = data.plan->Execute();
+      data.result        = data.plan->Execute();
     }
 
-    auto result_chunk = data.res->Fetch();
+    auto result_chunk = data.result->Fetch();
     if (!result_chunk) { return; }
 
     output.Move(*result_chunk);
@@ -439,7 +439,7 @@ namespace duckdb {
     }
 
     output.SetCardinality(1);
-    output.SetValue(0, 0, fn_data.physical_plan->ToString());
+    output.SetValue(0, 0, fn_data.physical_plan->Root().ToString());
   }
 
 
@@ -487,7 +487,9 @@ namespace duckdb {
       fn_data.logical_plan = fn_data.translator->TranspilePlanMessage(*(fn_data.sys_plan->duck_plan));
 
       // Convert engine plan to execution plan
-      fn_data.plan_data->plan = fn_data.translator->TranslateLogicalPlan(*(fn_data.logical_plan), false);
+      fn_data.plan_data->physical_plan = fn_data.translator->TranslateLogicalPlan(
+        *(fn_data.logical_plan), false
+      );
 
       // Initialize a plan executor
       fn_data.executor = make_uniq<DuckDBExecutor>(context, *(fn_data.plan_data));

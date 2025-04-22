@@ -105,10 +105,9 @@ namespace duckdb {
     return std::move(planner.plan);
   }
 
-  unique_ptr<PhysicalOperator>
+  unique_ptr<PhysicalPlan>
   DuckDBTranslator::TranslateLogicalPlan(LogicalOperator& logical_plan, bool optimize) {
-    // Make a copy that is a unique_ptr
-    auto engine_plan = logical_plan.Copy(context);
+    unique_ptr<LogicalOperator> engine_plan = logical_plan.Copy(context);
 
     // optimization
     if (optimize) {
@@ -120,7 +119,7 @@ namespace duckdb {
 
     // transformation to physical plan
     PhysicalPlanGenerator physical_planner { context };
-    return physical_planner.CreatePlan(std::move(engine_plan));
+    return physical_planner.Plan(std::move(engine_plan));
   }
 
   bool ExecutionFailed(PendingExecutionResult& exec_result) {

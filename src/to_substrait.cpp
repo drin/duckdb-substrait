@@ -1053,8 +1053,8 @@ void PrintRelAsJson(skysubstrait::Rel* rel) {
 	std::string                              json_output;
 	google::protobuf::util::JsonPrintOptions options;
 
-	options.add_whitespace                = false; // Pretty-print with indentation
-	options.always_print_primitive_fields = true;  // Print even if default values
+	options.add_whitespace                       = false; // Pretty-print with indentation
+	options.always_print_fields_with_no_presence = true;  // Print even if default values
 
 	auto status = google::protobuf::util::MessageToJsonString(*rel, &json_output, options);
 	if (!status.ok()) { Printer::Print("pb MessageToJsonString failed"); }
