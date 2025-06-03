@@ -322,31 +322,31 @@ LogicalType SubstraitToDuckDB::SubstraitToDuckType(const skysubstrait::Type &s_t
 		}
 		case skysubstrait::Type::KindCase::kDate:
 			return {LogicalTypeId::DATE};
-		case substrait::Type::KindCase::kTime:
+		case skysubstrait::Type::KindCase::kTime:
 			return {LogicalTypeId::TIME};
 		case skysubstrait::Type::KindCase::kVarchar:
 		case skysubstrait::Type::KindCase::kString:
 			return {LogicalTypeId::VARCHAR};
-		case substrait::Type::KindCase::kBinary:
+		case skysubstrait::Type::KindCase::kBinary:
 			return {LogicalTypeId::BLOB};
-		case substrait::Type::KindCase::kFp32:
+		case skysubstrait::Type::KindCase::kFp32:
 			return {LogicalTypeId::FLOAT};
 		case skysubstrait::Type::KindCase::kFp64:
 			return {LogicalTypeId::DOUBLE};
-		case substrait::Type::KindCase::kTimestamp:
+		case skysubstrait::Type::KindCase::kTimestamp:
 			return {LogicalTypeId::TIMESTAMP};
-		case substrait::Type::KindCase::kList: {
+		case skysubstrait::Type::KindCase::kList: {
 			auto &s_list_type = s_type.list();
 			auto element_type = SubstraitToDuckType(s_list_type.type());
 			return LogicalType::LIST(element_type);
 		}
-		case substrait::Type::KindCase::kMap: {
+		case skysubstrait::Type::KindCase::kMap: {
 			auto &s_map_type = s_type.map();
 			auto key_type = SubstraitToDuckType(s_map_type.key());
 			auto value_type = SubstraitToDuckType(s_map_type.value());
 			return LogicalType::MAP(key_type, value_type);
 		}
-		case substrait::Type::KindCase::kStruct: {
+		case skysubstrait::Type::KindCase::kStruct: {
 			auto &s_struct_type = s_type.struct_();
 			child_list_t<LogicalType> children;
 
@@ -358,9 +358,9 @@ LogicalType SubstraitToDuckDB::SubstraitToDuckType(const skysubstrait::Type &s_t
 
 			return LogicalType::STRUCT(children);
 		}
-		case substrait::Type::KindCase::kUuid:
+		case skysubstrait::Type::KindCase::kUuid:
 			return {LogicalTypeId::UUID};
-		case substrait::Type::KindCase::kIntervalDay:
+		case skysubstrait::Type::KindCase::kIntervalDay:
 			return {LogicalTypeId::INTERVAL};
 		default:
 			throw NotImplementedException(

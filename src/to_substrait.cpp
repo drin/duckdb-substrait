@@ -1357,17 +1357,17 @@ skysubstrait::Type DuckDBToSubstrait::DuckToSubstraitType(const LogicalType &typ
 		return s_type;
 	}
 	case LogicalTypeId::MAP: {
-		auto map_type = new substrait::Type_Map;
+		auto map_type = new skysubstrait::Type_Map;
 		map_type->set_nullability(type_nullability);
 
 		auto key_type = MapType::KeyType(type);
 		auto value_type = MapType::ValueType(type);
 
-		auto key = new substrait::Type();
+		auto key = new skysubstrait::Type();
 		*key = DuckToSubstraitType(key_type, column_statistics, not_null);
 		map_type->set_allocated_key(key);
 
-		auto value = new substrait::Type();
+		auto value = new skysubstrait::Type();
 		*value = DuckToSubstraitType(value_type, column_statistics, not_null);
 		map_type->set_allocated_value(value);
 
@@ -1375,12 +1375,12 @@ skysubstrait::Type DuckDBToSubstrait::DuckToSubstraitType(const LogicalType &typ
 		return s_type;
 	}
 	case LogicalTypeId::LIST: {
-		auto list_type = new substrait::Type_List;
+		auto list_type = new skysubstrait::Type_List;
 		list_type->set_nullability(type_nullability);
 
 		auto child_type = ListType::GetChildType(type);
 
-		auto element_type = new substrait::Type();
+		auto element_type = new skysubstrait::Type();
 		*element_type = DuckToSubstraitType(child_type, column_statistics, not_null);
 		list_type->set_allocated_type(element_type);
 
